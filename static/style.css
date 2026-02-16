@@ -115,6 +115,87 @@ h1 {
     border-radius: 2px;
 }
 
+/* Photo page: full-viewport layout */
+.photo-page header {
+    display: none;
+}
+
+.photo-page main {
+    max-width: none;
+    padding: 0;
+    height: 100vh;
+}
+
+.photo-page .photo-viewer {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    background: #000;
+    color: #fff;
+}
+
+.photo-topbar {
+    padding: 0.75rem 1rem;
+    flex-shrink: 0;
+}
+
+.photo-back {
+    color: rgba(255, 255, 255, 0.7);
+    text-decoration: none;
+    font-size: 0.9rem;
+}
+
+.photo-back:hover {
+    color: #fff;
+}
+
+.photo-stage {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+}
+
+.photo-nav {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 4rem;
+    flex-shrink: 0;
+    align-self: stretch;
+    font-size: 2.5rem;
+    text-decoration: none;
+    color: rgba(255, 255, 255, 0.5);
+    transition: background 0.2s, color 0.2s;
+    user-select: none;
+}
+
+.photo-nav:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+}
+
+.photo-nav-disabled {
+    visibility: hidden;
+}
+
+.photo-main {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+}
+
+.photo-main img {
+    max-width: 100%;
+    max-height: 100%;
+    display: block;
+    object-fit: contain;
+}
+
 @media (max-width: 600px) {
     main {
         padding: 1rem;
@@ -126,5 +207,10 @@ h1 {
 
     .photo-grid {
         grid-template-columns: 1fr;
+    }
+
+    .photo-nav {
+        width: 2.5rem;
+        font-size: 1.5rem;
     }
 }

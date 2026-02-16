@@ -13,7 +13,7 @@
 
 <div class="photo-grid">
     {% for photo in photos %}
-    <a href="/photos/{{ album.slug }}/{{ photo.filename }}" class="photo-card">
+    <a href="/album/{{ album.slug }}/{{ photo.filename }}" class="photo-card">
         <img src="/thumbs/{{ album.slug }}/medium/{{ photo.filename }}" alt="{{ photo.filename }}" loading="lazy">
     </a>
     {% endfor %}

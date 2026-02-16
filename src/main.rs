@@ -75,6 +75,15 @@ struct AlbumTemplate {
     photos: Vec<Photo>,
 }
 
+#[derive(Template)]
+#[template(path = "photo.html")]
+struct PhotoTemplate {
+    album: Album,
+    photo: Photo,
+    prev: Option<Photo>,
+    next: Option<Photo>,
+}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
@@ -87,6 +96,7 @@ async fn main() {
     let app = Router::new()
         .route("/", get(index))
         .route("/album/{slug}", get(album))
+        .route("/album/{slug}/{filename}", get(photo))
         .route("/photos/{album}/{filename}", get(serve_photo))
         .route("/thumbs/{album}/{size}/{filename}", get(serve_thumb))
         .nest_service("/static", ServeDir::new("static"))
@@ -126,6 +136,65 @@ async fn album(
     };
 
     Ok(Html((AlbumTemplate { album, photos }).render()?))
+}
+
+async fn photo(
+    State(state): State<AppState>,
+    extract::Path((slug, filename)): extract::Path<(String, String)>,
+) -> Result<impl IntoResponse, AppError> {
+    let album_path = state.photos_dir.join(&slug);
+    if !album_path.is_dir() {
+        return Err(AppError::NotFound);
+    }
+
+    let meta = load_meta(&album_path);
+    let photos = list_photos(&album_path);
+
+    let index = photos
+        .iter()
+        .position(|p| p.filename == filename)
+        .ok_or(AppError::NotFound)?;
+
+    let prev = if index > 0 {
+        Some(Photo {
+            filename: photos[index - 1].filename.clone(),
+        })
+    } else {
+        None
+    };
+
+    let next = if index + 1 < photos.len() {
+        Some(Photo {
+            filename: photos[index + 1].filename.clone(),
+        })
+    } else {
+        None
+    };
+
+    let cover = photos.first().map(|p| p.filename.clone());
+    let album = Album {
+        title: meta.title.unwrap_or_else(|| slug_to_title(&slug)),
+        description: meta.description.unwrap_or_default(),
+        timespan: meta
+            .timespan
+            .unwrap_or_else(|| derive_timespan(&album_path, &photos)),
+        slug,
+        cover,
+    };
+
+    let photo = Photo {
+        filename: filename.clone(),
+    };
+
+    Ok(Html(
+        (PhotoTemplate {
+            album,
+            photo,
+            prev,
+            next,
+        })
+        .render()?,
+    ))
 }
 
 async fn serve_photo(

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block title %}{{ photo.filename }} – {{ album.title }} – Kuvasivu{% endblock %}
+
+{% block body_attr %} class="photo-page"{% endblock %}
+
+{% block content %}
+<div class="photo-viewer">
+    <div class="photo-topbar">
+        <a href="/album/{{ album.slug }}" class="photo-back">&larr; {{ album.title }}</a>
+    </div>
+
+    <div class="photo-stage">
+        {% if let Some(prev) = prev %}
+        <a href="/album/{{ album.slug }}/{{ prev.filename }}" class="photo-nav photo-nav-prev" aria-label="Previous photo">&lsaquo;</a>
+        {% else %}
+        <span class="photo-nav photo-nav-prev photo-nav-disabled"></span>
+        {% endif %}
+
+        <div class="photo-main">
+            <img src="/thumbs/{{ album.slug }}/medium/{{ photo.filename }}" alt="{{ photo.filename }}">
+        </div>
+
+        {% if let Some(next) = next %}
+        <a href="/album/{{ album.slug }}/{{ next.filename }}" class="photo-nav photo-nav-next" aria-label="Next photo">&rsaquo;</a>
+        {% else %}
+        <span class="photo-nav photo-nav-next photo-nav-disabled"></span>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'ArrowLeft') {
+        var prev = document.querySelector('.photo-nav-prev[href]');
+        if (prev) prev.click();
+    } else if (e.key === 'ArrowRight') {
+        var next = document.querySelector('.photo-nav-next[href]');
+        if (next) next.click();
+    }
+});
+</script>
+{% endblock %}
