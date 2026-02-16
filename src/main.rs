@@ -12,20 +12,20 @@ use serde::Deserialize;
 use tower_http::services::ServeDir;
 
 enum AppError {
-    Render(askama::Error),
+    Render,
     NotFound,
 }
 
 impl From<askama::Error> for AppError {
-    fn from(err: askama::Error) -> Self {
-        AppError::Render(err)
+    fn from(_: askama::Error) -> Self {
+        AppError::Render
     }
 }
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         match self {
-            AppError::Render(_) => {
+            AppError::Render => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "Failed to render template").into_response()
             }
             AppError::NotFound => StatusCode::NOT_FOUND.into_response(),
@@ -473,7 +473,7 @@ fn read_exif_date(path: &Path) -> Option<String> {
 fn format_year_month(datetime_str: &str) -> String {
     // EXIF date format: "2024-06-15 12:00:00" or "2024:06:15 12:00:00"
     let parts: Vec<&str> = datetime_str
-        .split(|c| c == '-' || c == ':' || c == ' ')
+        .split(['-', ':', ' '])
         .collect();
     if parts.len() >= 2 {
         let year = parts[0];
