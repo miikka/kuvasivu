@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block title %}Albums – Kuvasivu{% endblock %}
+
+{% block content %}
+<h1>Albums</h1>
+{% if albums.is_empty() %}
+<p>No albums yet. Add a directory with photos to <code>photos/</code> to get started.</p>
+{% else %}
+<div class="album-grid">
+    {% for album in albums %}
+    <a href="/album/{{ album.slug }}" class="album-card">
+        {% if let Some(cover) = album.cover %}
+        <img src="/thumbs/{{ album.slug }}/small/{{ cover }}" alt="{{ album.title }}" loading="lazy">
+        {% else %}
+        <div class="album-placeholder"></div>
+        {% endif %}
+        <div class="album-info">
+            <h2>{{ album.title }}</h2>
+            {% if !album.timespan.is_empty() %}
+            <p class="timespan">{{ album.timespan }}</p>
+            {% endif %}
+        </div>
+    </a>
+    {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

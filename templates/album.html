@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block title %}{{ album.title }} – Kuvasivu{% endblock %}
+
+{% block content %}
+<h1>{{ album.title }}</h1>
+{% if !album.timespan.is_empty() %}
+<p class="timespan">{{ album.timespan }}</p>
+{% endif %}
+{% if !album.description.is_empty() %}
+<p class="description">{{ album.description }}</p>
+{% endif %}
+
+<div class="photo-grid">
+    {% for photo in photos %}
+    <a href="/photos/{{ album.slug }}/{{ photo.filename }}" class="photo-card">
+        <img src="/thumbs/{{ album.slug }}/medium/{{ photo.filename }}" alt="{{ photo.filename }}" loading="lazy">
+    </a>
+    {% endfor %}
+</div>
+{% endblock %}
