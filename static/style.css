@@ -208,6 +208,35 @@ h1 {
     object-fit: contain;
 }
 
+@media (prefers-color-scheme: dark) {
+    body {
+        color: #e0e0e0;
+        background: #121212;
+    }
+
+    header {
+        background: #1a1a1a;
+        border-bottom-color: #333;
+    }
+
+    .timespan {
+        color: #999;
+    }
+
+    .album-card {
+        background: #1a1a1a;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    }
+
+    .album-card:hover {
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+    }
+
+    .album-placeholder {
+        background: #333;
+    }
+}
+
 @media (max-width: 600px) {
     main {
         padding: 1rem;
