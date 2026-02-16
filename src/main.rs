@@ -4,12 +4,34 @@ use std::sync::Arc;
 use askama::Template;
 use axum::extract::{self, State};
 use axum::http::StatusCode;
-use axum::response::{Html, IntoResponse};
+use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
 use image::imageops::FilterType;
 use serde::Deserialize;
 use tower_http::services::ServeDir;
+
+enum AppError {
+    Render(askama::Error),
+    NotFound,
+}
+
+impl From<askama::Error> for AppError {
+    fn from(err: askama::Error) -> Self {
+        AppError::Render(err)
+    }
+}
+
+impl IntoResponse for AppError {
+    fn into_response(self) -> Response {
+        match self {
+            AppError::Render(_) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, "Failed to render template").into_response()
+            }
+            AppError::NotFound => StatusCode::NOT_FOUND.into_response(),
+        }
+    }
+}
 
 const PHOTOS_DIR: &str = "photos";
 const THUMB_DIR: &str = ".thumbs";
@@ -75,19 +97,18 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-async fn index(State(state): State<AppState>) -> impl IntoResponse {
+async fn index(State(state): State<AppState>) -> Result<impl IntoResponse, AppError> {
     let albums = scan_albums(&state.photos_dir);
-    // TODO(miikka) Use Result instead of unwrap!
-    Html((IndexTemplate { albums }).render().unwrap())
+    Ok(Html((IndexTemplate { albums }).render()?))
 }
 
 async fn album(
     State(state): State<AppState>,
     extract::Path(slug): extract::Path<String>,
-) -> Result<impl IntoResponse, StatusCode> {
+) -> Result<impl IntoResponse, AppError> {
     let album_path = state.photos_dir.join(&slug);
     if !album_path.is_dir() {
-        return Err(StatusCode::NOT_FOUND);
+        return Err(AppError::NotFound);
     }
 
     let meta = load_meta(&album_path);
@@ -104,8 +125,7 @@ async fn album(
         cover,
     };
 
-    // TODO(miikka) Use Result instead of unwrap()
-    Ok(Html((AlbumTemplate { album, photos }).render().unwrap()))
+    Ok(Html((AlbumTemplate { album, photos }).render()?))
 }
 
 async fn serve_photo(
