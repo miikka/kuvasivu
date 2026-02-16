@@ -137,12 +137,24 @@ h1 {
 .photo-topbar {
     padding: 0.75rem 1rem;
     flex-shrink: 0;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
 }
 
 .photo-back {
     color: rgba(255, 255, 255, 0.7);
     text-decoration: none;
     font-size: 0.9rem;
+}
+
+.photo-exif {
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 0.8rem;
+}
+
+.photo-exif-settings {
+    margin-left: 0.5em;
 }
 
 .photo-back:hover {

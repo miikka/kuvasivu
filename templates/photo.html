@@ -8,6 +8,9 @@
 <div class="photo-viewer">
     <div class="photo-topbar">
         <a href="/album/{{ album.slug }}" class="photo-back">&larr; {{ album.title }}</a>
+        {% if exif.camera.is_some() || exif.lens.is_some() %}
+        <span class="photo-exif">{{ exif.summary() }}</span>
+        {% endif %}
     </div>
 
     <div class="photo-stage">

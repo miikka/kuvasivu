@@ -62,6 +62,47 @@ struct Photo {
     filename: String,
 }
 
+struct ExifInfo {
+    camera: Option<String>,
+    lens: Option<String>,
+    focal_length: Option<String>,
+    aperture: Option<String>,
+    exposure: Option<String>,
+    iso: Option<String>,
+}
+
+impl ExifInfo {
+    fn summary(&self) -> String {
+        let mut parts = Vec::new();
+
+        if let Some(camera) = &self.camera {
+            parts.push(camera.clone());
+        }
+        if let Some(lens) = &self.lens {
+            parts.push(lens.clone());
+        }
+
+        let mut settings = Vec::new();
+        if let Some(fl) = &self.focal_length {
+            settings.push(fl.clone());
+        }
+        if let Some(ap) = &self.aperture {
+            settings.push(format!("\u{192}/{}", ap));
+        }
+        if let Some(ex) = &self.exposure {
+            settings.push(format!("{}s", ex));
+        }
+        if let Some(iso) = &self.iso {
+            settings.push(format!("ISO {}", iso));
+        }
+        if !settings.is_empty() {
+            parts.push(settings.join("  "));
+        }
+
+        parts.join(" · ")
+    }
+}
+
 #[derive(Template)]
 #[template(path = "index.html")]
 struct IndexTemplate {
@@ -82,6 +123,7 @@ struct PhotoTemplate {
     photo: Photo,
     prev: Option<Photo>,
     next: Option<Photo>,
+    exif: ExifInfo,
 }
 
 #[tokio::main]
@@ -182,6 +224,9 @@ async fn photo(
         cover,
     };
 
+    let photo_path = album_path.join(&filename);
+    let exif = read_exif_info(&photo_path);
+
     let photo = Photo {
         filename: filename.clone(),
     };
@@ -192,6 +237,7 @@ async fn photo(
             photo,
             prev,
             next,
+            exif,
         })
         .render()?,
     ))
@@ -365,6 +411,53 @@ fn derive_timespan(album_path: &Path, photos: &[Photo]) -> String {
     } else {
         format!("{} – {}", first_month, last_month)
     }
+}
+
+fn read_exif_info(path: &Path) -> ExifInfo {
+    let get_info = || -> Option<ExifInfo> {
+        let file = std::fs::File::open(path).ok()?;
+        let mut bufreader = std::io::BufReader::new(file);
+        let exif = exif::Reader::new()
+            .read_from_container(&mut bufreader)
+            .ok()?;
+
+        let get = |tag: exif::Tag| -> Option<String> {
+            let field = exif.get_field(tag, exif::In::PRIMARY)?;
+            let val = field.display_value().to_string().trim_matches('"').to_string();
+            if val.is_empty() { None } else { Some(val) }
+        };
+
+        let camera = match (get(exif::Tag::Make), get(exif::Tag::Model)) {
+            (Some(make), Some(model)) => {
+                if model.starts_with(&make) {
+                    Some(model)
+                } else {
+                    Some(format!("{} {}", make, model))
+                }
+            }
+            (None, Some(model)) => Some(model),
+            (Some(make), None) => Some(make),
+            (None, None) => None,
+        };
+
+        Some(ExifInfo {
+            camera,
+            lens: get(exif::Tag::LensModel),
+            focal_length: get(exif::Tag::FocalLength),
+            aperture: get(exif::Tag::FNumber),
+            exposure: get(exif::Tag::ExposureTime),
+            iso: get(exif::Tag::PhotographicSensitivity),
+        })
+    };
+
+    get_info().unwrap_or(ExifInfo {
+        camera: None,
+        lens: None,
+        focal_length: None,
+        aperture: None,
+        exposure: None,
+        iso: None,
+    })
 }
 
 fn read_exif_date(path: &Path) -> Option<String> {
