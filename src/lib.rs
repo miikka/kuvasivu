@@ -41,9 +41,15 @@ const THUMB_DIR: &str = ".thumbs";
 const SMALL_SIZE: u32 = 400;
 const MEDIUM_SIZE: u32 = 1200;
 
+#[derive(Deserialize)]
+struct SiteConfig {
+    title: Option<String>,
+}
+
 #[derive(Clone)]
 struct AppState {
     photos_dir: Arc<PathBuf>,
+    site_title: Arc<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -68,12 +74,14 @@ struct Photo {
 #[derive(Template)]
 #[template(path = "index.html")]
 struct IndexTemplate {
+    site_title: String,
     albums: Vec<Album>,
 }
 
 #[derive(Template)]
 #[template(path = "album.html")]
 struct AlbumTemplate {
+    site_title: String,
     album: Album,
     photos: Vec<Photo>,
 }
@@ -81,6 +89,7 @@ struct AlbumTemplate {
 #[derive(Template)]
 #[template(path = "photo.html")]
 struct PhotoTemplate {
+    site_title: String,
     album: Album,
     photo: Photo,
     prev: Option<Photo>,
@@ -88,9 +97,18 @@ struct PhotoTemplate {
     exif: ExifInfo,
 }
 
+fn load_site_config() -> SiteConfig {
+    std::fs::read_to_string("site.toml")
+        .ok()
+        .and_then(|s| toml::from_str(&s).ok())
+        .unwrap_or(SiteConfig { title: None })
+}
+
 pub fn build_router(photos_dir: PathBuf) -> Router {
+    let config = load_site_config();
     let state = AppState {
         photos_dir: Arc::new(photos_dir),
+        site_title: Arc::new(config.title.unwrap_or_else(|| "Kuvasivu".to_string())),
     };
 
     Router::new()
@@ -105,7 +123,8 @@ pub fn build_router(photos_dir: PathBuf) -> Router {
 
 async fn index(State(state): State<AppState>) -> Result<impl IntoResponse, AppError> {
     let albums = scan_albums(&state.photos_dir);
-    Ok(Html((IndexTemplate { albums }).render()?))
+    let site_title = state.site_title.to_string();
+    Ok(Html((IndexTemplate { site_title, albums }).render()?))
 }
 
 async fn album(
@@ -120,7 +139,8 @@ async fn album(
     let photos = list_photos(&album_path);
     let album = load_album(&slug, &album_path, &photos);
 
-    Ok(Html((AlbumTemplate { album, photos }).render()?))
+    let site_title = state.site_title.to_string();
+    Ok(Html((AlbumTemplate { site_title, album, photos }).render()?))
 }
 
 async fn photo(
@@ -164,8 +184,10 @@ async fn photo(
         filename: filename.clone(),
     };
 
+    let site_title = state.site_title.to_string();
     Ok(Html(
         (PhotoTemplate {
+            site_title,
             album,
             photo,
             prev,

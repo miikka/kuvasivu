@@ -136,7 +136,8 @@ expression: body
         } else if (e.key === 'ArrowRight' && nextLink.hasAttribute('href')) {
             navigateTo(nextLink.href);
         } else if (e.key === 'Escape') {
-            window.location = document.querySelector('.photo-back').href;
+            e.preventDefault();
+            window.location.href = document.querySelector('.photo-back').href;
         }
     });
 
