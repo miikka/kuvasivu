@@ -1,3 +1,5 @@
+mod exif;
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -10,6 +12,8 @@ use axum::Router;
 use image::imageops::FilterType;
 use serde::Deserialize;
 use tower_http::services::ServeDir;
+
+use exif::{ExifInfo, read_exif_info};
 
 enum AppError {
     Render,
@@ -60,47 +64,6 @@ struct Album {
 
 struct Photo {
     filename: String,
-}
-
-struct ExifInfo {
-    camera: Option<String>,
-    lens: Option<String>,
-    focal_length: Option<String>,
-    aperture: Option<String>,
-    exposure: Option<String>,
-    iso: Option<String>,
-}
-
-impl ExifInfo {
-    fn summary(&self) -> String {
-        let mut parts = Vec::new();
-
-        if let Some(camera) = &self.camera {
-            parts.push(camera.clone());
-        }
-        if let Some(lens) = &self.lens {
-            parts.push(lens.clone());
-        }
-
-        let mut settings = Vec::new();
-        if let Some(fl) = &self.focal_length {
-            settings.push(fl.clone());
-        }
-        if let Some(ap) = &self.aperture {
-            settings.push(format!("\u{192}/{}", ap));
-        }
-        if let Some(ex) = &self.exposure {
-            settings.push(format!("{}s", ex));
-        }
-        if let Some(iso) = &self.iso {
-            settings.push(format!("ISO {}", iso));
-        }
-        if !settings.is_empty() {
-            parts.push(settings.join("  "));
-        }
-
-        parts.join(" · ")
-    }
 }
 
 #[derive(Template)]
@@ -163,19 +126,8 @@ async fn album(
         return Err(AppError::NotFound);
     }
 
-    let meta = load_meta(&album_path);
     let photos = list_photos(&album_path);
-    let cover = photos.first().map(|p| p.filename.clone());
-
-    let album = Album {
-        title: meta.title.unwrap_or_else(|| slug_to_title(&slug)),
-        description: meta.description.unwrap_or_default(),
-        timespan: meta
-            .timespan
-            .unwrap_or_else(|| derive_timespan(&album_path, &photos)),
-        slug,
-        cover,
-    };
+    let album = load_album(&slug, &album_path, &photos);
 
     Ok(Html((AlbumTemplate { album, photos }).render()?))
 }
@@ -189,7 +141,6 @@ async fn photo(
         return Err(AppError::NotFound);
     }
 
-    let meta = load_meta(&album_path);
     let photos = list_photos(&album_path);
 
     let index = photos
@@ -213,16 +164,7 @@ async fn photo(
         None
     };
 
-    let cover = photos.first().map(|p| p.filename.clone());
-    let album = Album {
-        title: meta.title.unwrap_or_else(|| slug_to_title(&slug)),
-        description: meta.description.unwrap_or_default(),
-        timespan: meta
-            .timespan
-            .unwrap_or_else(|| derive_timespan(&album_path, &photos)),
-        slug,
-        cover,
-    };
+    let album = load_album(&slug, &album_path, &photos);
 
     let photo_path = album_path.join(&filename);
     let exif = read_exif_info(&photo_path);
@@ -323,23 +265,26 @@ fn scan_albums(photos_dir: &Path) -> Vec<Album> {
             continue;
         }
         let slug = entry.file_name().to_string_lossy().to_string();
-        let meta = load_meta(&path);
         let photos = list_photos(&path);
-        let cover = photos.first().map(|p| p.filename.clone());
-
-        albums.push(Album {
-            title: meta.title.unwrap_or_else(|| slug_to_title(&slug)),
-            description: meta.description.unwrap_or_default(),
-            timespan: meta
-                .timespan
-                .unwrap_or_else(|| derive_timespan(&path, &photos)),
-            slug,
-            cover,
-        });
+        albums.push(load_album(&slug, &path, &photos));
     }
 
     albums.sort_by(|a, b| a.title.cmp(&b.title));
     albums
+}
+
+fn load_album(slug: &str, album_path: &Path, photos: &[Photo]) -> Album {
+    let meta = load_meta(album_path);
+    let cover = photos.first().map(|p| p.filename.clone());
+    Album {
+        title: meta.title.unwrap_or_else(|| slug_to_title(slug)),
+        description: meta.description.unwrap_or_default(),
+        timespan: meta
+            .timespan
+            .unwrap_or_else(|| derive_timespan(album_path, photos)),
+        slug: slug.to_string(),
+        cover,
+    }
 }
 
 fn load_meta(album_path: &Path) -> AlbumMeta {
@@ -390,7 +335,7 @@ fn derive_timespan(album_path: &Path, photos: &[Photo]) -> String {
     let mut dates: Vec<String> = Vec::new();
 
     for photo in photos {
-        if let Some(date) = read_exif_date(&album_path.join(&photo.filename)) {
+        if let Some(date) = exif::read_exif_date(&album_path.join(&photo.filename)) {
             dates.push(date);
         }
     }
@@ -403,98 +348,12 @@ fn derive_timespan(album_path: &Path, photos: &[Photo]) -> String {
     let first = &dates[0];
     let last = &dates[dates.len() - 1];
 
-    let first_month = format_year_month(first);
-    let last_month = format_year_month(last);
+    let first_month = exif::format_year_month(first);
+    let last_month = exif::format_year_month(last);
 
     if first_month == last_month {
         first_month
     } else {
         format!("{} – {}", first_month, last_month)
-    }
-}
-
-fn read_exif_info(path: &Path) -> ExifInfo {
-    let get_info = || -> Option<ExifInfo> {
-        let file = std::fs::File::open(path).ok()?;
-        let mut bufreader = std::io::BufReader::new(file);
-        let exif = exif::Reader::new()
-            .read_from_container(&mut bufreader)
-            .ok()?;
-
-        let get = |tag: exif::Tag| -> Option<String> {
-            let field = exif.get_field(tag, exif::In::PRIMARY)?;
-            let val = field.display_value().to_string().trim_matches('"').to_string();
-            if val.is_empty() { None } else { Some(val) }
-        };
-
-        let camera = match (get(exif::Tag::Make), get(exif::Tag::Model)) {
-            (Some(make), Some(model)) => {
-                if model.starts_with(&make) {
-                    Some(model)
-                } else {
-                    Some(format!("{} {}", make, model))
-                }
-            }
-            (None, Some(model)) => Some(model),
-            (Some(make), None) => Some(make),
-            (None, None) => None,
-        };
-
-        Some(ExifInfo {
-            camera,
-            lens: get(exif::Tag::LensModel),
-            focal_length: get(exif::Tag::FocalLength),
-            aperture: get(exif::Tag::FNumber),
-            exposure: get(exif::Tag::ExposureTime),
-            iso: get(exif::Tag::PhotographicSensitivity),
-        })
-    };
-
-    get_info().unwrap_or(ExifInfo {
-        camera: None,
-        lens: None,
-        focal_length: None,
-        aperture: None,
-        exposure: None,
-        iso: None,
-    })
-}
-
-fn read_exif_date(path: &Path) -> Option<String> {
-    let file = std::fs::File::open(path).ok()?;
-    let mut bufreader = std::io::BufReader::new(file);
-    let exif = exif::Reader::new()
-        .read_from_container(&mut bufreader)
-        .ok()?;
-    let field = exif.get_field(exif::Tag::DateTimeOriginal, exif::In::PRIMARY)?;
-    Some(field.display_value().to_string())
-}
-
-fn format_year_month(datetime_str: &str) -> String {
-    // EXIF date format: "2024-06-15 12:00:00" or "2024:06:15 12:00:00"
-    let parts: Vec<&str> = datetime_str
-        .split(['-', ':', ' '])
-        .collect();
-    if parts.len() >= 2 {
-        let year = parts[0];
-        let month_num: u32 = parts[1].parse().unwrap_or(0);
-        let month_name = match month_num {
-            1 => "January",
-            2 => "February",
-            3 => "March",
-            4 => "April",
-            5 => "May",
-            6 => "June",
-            7 => "July",
-            8 => "August",
-            9 => "September",
-            10 => "October",
-            11 => "November",
-            12 => "December",
-            _ => return datetime_str.to_string(),
-        };
-        format!("{} {}", month_name, year)
-    } else {
-        datetime_str.to_string()
     }
 }
