@@ -52,29 +52,22 @@ pub fn read_exif(path: &Path) -> Option<exif::Exif> {
         .ok()
 }
 
-pub fn exif_field(exif: &exif::Exif, tag: exif::Tag) -> Option<String> {
-    let field = exif.get_field(tag, exif::In::PRIMARY)?;
-    let val = field
-        .display_value()
-        .to_string()
-        .trim_matches('"')
-        .to_string();
+fn clean_exif_value(raw: &str) -> Option<String> {
+    let val = raw.trim_matches('"');
     if val.is_empty() {
         None
     } else {
-        Some(val)
+        Some(val.to_string())
     }
 }
 
-pub fn read_exif_info(path: &Path) -> ExifInfo {
-    let Some(exif) = read_exif(path) else {
-        return ExifInfo::default();
-    };
+pub fn exif_field(exif: &exif::Exif, tag: exif::Tag) -> Option<String> {
+    let field = exif.get_field(tag, exif::In::PRIMARY)?;
+    clean_exif_value(&field.display_value().to_string())
+}
 
-    let camera = match (
-        exif_field(&exif, exif::Tag::Make),
-        exif_field(&exif, exif::Tag::Model),
-    ) {
+fn camera_name(make: Option<String>, model: Option<String>) -> Option<String> {
+    match (make, model) {
         (Some(make), Some(model)) => {
             if model.starts_with(&make) {
                 Some(model)
@@ -85,7 +78,18 @@ pub fn read_exif_info(path: &Path) -> ExifInfo {
         (None, Some(model)) => Some(model),
         (Some(make), None) => Some(make),
         (None, None) => None,
+    }
+}
+
+pub fn read_exif_info(path: &Path) -> ExifInfo {
+    let Some(exif) = read_exif(path) else {
+        return ExifInfo::default();
     };
+
+    let camera = camera_name(
+        exif_field(&exif, exif::Tag::Make),
+        exif_field(&exif, exif::Tag::Model),
+    );
 
     ExifInfo {
         camera,
@@ -224,6 +228,35 @@ mod tests {
     }
 
     #[test]
+    fn camera_name_model_starts_with_make() {
+        let result = camera_name(Some("Canon".into()), Some("Canon EOS R5".into()));
+        assert_eq!(result.as_deref(), Some("Canon EOS R5"));
+    }
+
+    #[test]
+    fn camera_name_make_and_model() {
+        let result = camera_name(Some("FUJIFILM".into()), Some("X-T5".into()));
+        assert_eq!(result.as_deref(), Some("FUJIFILM X-T5"));
+    }
+
+    #[test]
+    fn camera_name_model_only() {
+        let result = camera_name(None, Some("X-T5".into()));
+        assert_eq!(result.as_deref(), Some("X-T5"));
+    }
+
+    #[test]
+    fn camera_name_make_only() {
+        let result = camera_name(Some("FUJIFILM".into()), None);
+        assert_eq!(result.as_deref(), Some("FUJIFILM"));
+    }
+
+    #[test]
+    fn camera_name_none() {
+        assert!(camera_name(None, None).is_none());
+    }
+
+    #[test]
     fn format_year_month_colon_separated() {
         assert_eq!(format_year_month("2026:02:01 15:01:06"), "February 2026");
     }
@@ -234,6 +267,25 @@ mod tests {
     }
 
     #[test]
+    fn format_year_month_all_months() {
+        let expected = [
+            ("2024:01:15 12:00:00", "January 2024"),
+            ("2024:03:15 12:00:00", "March 2024"),
+            ("2024:04:15 12:00:00", "April 2024"),
+            ("2024:05:15 12:00:00", "May 2024"),
+            ("2024:07:15 12:00:00", "July 2024"),
+            ("2024:08:15 12:00:00", "August 2024"),
+            ("2024:09:15 12:00:00", "September 2024"),
+            ("2024:10:15 12:00:00", "October 2024"),
+            ("2024:11:15 12:00:00", "November 2024"),
+            ("2024:12:15 12:00:00", "December 2024"),
+        ];
+        for (input, output) in expected {
+            assert_eq!(format_year_month(input), output);
+        }
+    }
+
+    #[test]
     fn format_year_month_invalid() {
         assert_eq!(format_year_month("garbage"), "garbage");
     }
@@ -241,5 +293,31 @@ mod tests {
     #[test]
     fn format_year_month_invalid_month() {
         assert_eq!(format_year_month("2024:13:01 00:00:00"), "2024:13:01 00:00:00");
+    }
+
+    #[test]
+    fn clean_exif_value_normal() {
+        assert_eq!(clean_exif_value("hello"), Some("hello".into()));
+    }
+
+    #[test]
+    fn clean_exif_value_quoted() {
+        assert_eq!(clean_exif_value("\"hello\""), Some("hello".into()));
+    }
+
+    #[test]
+    fn clean_exif_value_empty() {
+        assert!(clean_exif_value("").is_none());
+    }
+
+    #[test]
+    fn clean_exif_value_only_quotes() {
+        assert!(clean_exif_value("\"\"").is_none());
+    }
+
+    #[test]
+    fn exif_field_missing_tag() {
+        let exif = read_exif(&fixture_path()).unwrap();
+        assert!(exif_field(&exif, exif::Tag::GPSLatitude).is_none());
     }
 }
