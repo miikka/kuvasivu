@@ -1,3 +1,6 @@
+run:
+     cargo run
+
 test-cov:
      cargo llvm-cov --html
 

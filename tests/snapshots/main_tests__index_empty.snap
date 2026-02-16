@@ -1,0 +1,26 @@
+---
+source: tests/main_tests.rs
+expression: body
+---
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Albums – Kuvasivu</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <nav><a href="/">Kuvasivu</a></nav>
+    </header>
+    <main>
+        
+<h1>Albums</h1>
+
+<p>No albums yet. Add a directory with photos to <code>photos/</code> to get started.</p>
+
+
+    </main>
+</body>
+</html>

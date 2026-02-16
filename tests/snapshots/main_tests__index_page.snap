@@ -1,0 +1,40 @@
+---
+source: tests/main_tests.rs
+expression: body
+---
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Albums – Kuvasivu</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <nav><a href="/">Kuvasivu</a></nav>
+    </header>
+    <main>
+        
+<h1>Albums</h1>
+
+<div class="album-grid">
+    
+    <a href="/album/test-album" class="album-card">
+        
+        <img src="/thumbs/test-album/small/photo-a.jpg" alt="Test Album" loading="lazy">
+        
+        <div class="album-info">
+            <h2>Test Album</h2>
+            
+            <p class="timespan">January 2024</p>
+            
+        </div>
+    </a>
+    
+</div>
+
+
+    </main>
+</body>
+</html>

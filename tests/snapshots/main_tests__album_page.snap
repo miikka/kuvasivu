@@ -1,0 +1,45 @@
+---
+source: tests/main_tests.rs
+expression: body
+---
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Test Album – Kuvasivu</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <nav><a href="/">Kuvasivu</a></nav>
+    </header>
+    <main>
+        
+<h1>Test Album</h1>
+
+<p class="timespan">January 2024</p>
+
+
+<p class="description">A test album.</p>
+
+
+<div class="photo-grid">
+    
+    <a href="/album/test-album/photo-a.jpg" class="photo-card">
+        <img src="/thumbs/test-album/medium/photo-a.jpg" alt="photo-a.jpg" loading="lazy">
+    </a>
+    
+    <a href="/album/test-album/photo-b.jpg" class="photo-card">
+        <img src="/thumbs/test-album/medium/photo-b.jpg" alt="photo-b.jpg" loading="lazy">
+    </a>
+    
+    <a href="/album/test-album/photo-c.jpg" class="photo-card">
+        <img src="/thumbs/test-album/medium/photo-c.jpg" alt="photo-c.jpg" loading="lazy">
+    </a>
+    
+</div>
+
+    </main>
+</body>
+</html>

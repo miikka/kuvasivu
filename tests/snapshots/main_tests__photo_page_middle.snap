@@ -1,0 +1,147 @@
+---
+source: tests/main_tests.rs
+expression: body
+---
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>photo-b.jpg – Test Album – Kuvasivu</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="photo-page">
+    <header>
+        <nav><a href="/">Kuvasivu</a></nav>
+    </header>
+    <main>
+        
+<div class="photo-viewer">
+    <div class="photo-topbar">
+        <a href="/album/test-album" class="photo-back">&larr; Test Album</a>
+        
+        <span class="photo-exif">FUJIFILM X-T5 · Fujifilm Fujinon XF18mmF1.4 R LM WR · 18 mm  ƒ/5.6  1/280s  ISO 125</span>
+        
+    </div>
+
+    <div class="photo-stage">
+        <a href="/album/test-album/photo-a.jpg" class="photo-nav photo-nav-prev" aria-label="Previous photo">&lsaquo;</a>
+
+        <div class="photo-main">
+            <img src="/thumbs/test-album/medium/photo-b.jpg" alt="photo-b.jpg">
+        </div>
+
+        <a href="/album/test-album/photo-c.jpg" class="photo-nav photo-nav-next" aria-label="Next photo">&rsaquo;</a>
+    </div>
+</div>
+
+<script>
+(function() {
+    var cache = {};
+    var navigating = false;
+    var prevLink = document.querySelector('.photo-nav-prev');
+    var nextLink = document.querySelector('.photo-nav-next');
+    var mainImg = document.querySelector('.photo-main img');
+    var exifSpan = document.querySelector('.photo-exif');
+    var topbar = document.querySelector('.photo-topbar');
+
+    function fetchPage(url) {
+        if (cache[url]) return cache[url];
+        cache[url] = fetch(url).then(function(r) { return r.text(); }).then(function(html) {
+            var doc = new DOMParser().parseFromString(html, 'text/html');
+            var imgSrc = doc.querySelector('.photo-main img').getAttribute('src');
+            // preload the image into browser cache
+            new Image().src = imgSrc;
+            return doc;
+        });
+        return cache[url];
+    }
+
+    function updateNav(linkEl, newEl) {
+        var href = newEl.getAttribute('href');
+        if (href) {
+            linkEl.setAttribute('href', href);
+            linkEl.classList.remove('photo-nav-disabled');
+        } else {
+            linkEl.removeAttribute('href');
+            linkEl.classList.add('photo-nav-disabled');
+        }
+    }
+
+    function navigateTo(url) {
+        if (!url || navigating) return;
+        navigating = true;
+        fetchPage(url).then(function(doc) {
+            var newImg = doc.querySelector('.photo-main img');
+            if (!newImg) { window.location = url; return; }
+            var imgSrc = newImg.getAttribute('src');
+
+            // preload image, then swap src once decoded
+            var loader = new Image();
+            loader.onload = loader.onerror = function() {
+                // update image in place — old image stays visible until new src paints
+                mainImg.src = imgSrc;
+                mainImg.alt = newImg.getAttribute('alt') || '';
+
+                // update nav links
+                updateNav(prevLink, doc.querySelector('.photo-nav-prev'));
+                updateNav(nextLink, doc.querySelector('.photo-nav-next'));
+
+                // update exif
+                var newExif = doc.querySelector('.photo-exif');
+                if (newExif && exifSpan) {
+                    exifSpan.textContent = newExif.textContent;
+                } else if (newExif && !exifSpan) {
+                    exifSpan = document.createElement('span');
+                    exifSpan.className = 'photo-exif';
+                    exifSpan.textContent = newExif.textContent;
+                    topbar.appendChild(exifSpan);
+                } else if (!newExif && exifSpan) {
+                    exifSpan.remove();
+                    exifSpan = null;
+                }
+
+                history.pushState(null, '', url);
+                document.title = doc.title;
+                preloadAdjacent();
+                navigating = false;
+            };
+            loader.src = imgSrc;
+            if (loader.complete) loader.onload();
+        });
+    }
+
+    function preloadAdjacent() {
+        [prevLink, nextLink].forEach(function(link) {
+            var href = link.getAttribute('href');
+            if (href) fetchPage(href);
+        });
+    }
+
+    prevLink.addEventListener('click', function(e) {
+        if (this.hasAttribute('href')) { e.preventDefault(); navigateTo(this.href); }
+    });
+    nextLink.addEventListener('click', function(e) {
+        if (this.hasAttribute('href')) { e.preventDefault(); navigateTo(this.href); }
+    });
+
+    window.addEventListener('popstate', function() {
+        navigating = false;
+        navigateTo(location.href);
+    });
+
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'ArrowLeft' && prevLink.hasAttribute('href')) {
+            navigateTo(prevLink.href);
+        } else if (e.key === 'ArrowRight' && nextLink.hasAttribute('href')) {
+            navigateTo(nextLink.href);
+        }
+    });
+
+    preloadAdjacent();
+})();
+</script>
+
+    </main>
+</body>
+</html>
