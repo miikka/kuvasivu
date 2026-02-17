@@ -307,6 +307,42 @@ async fn test_serve_photo_webp() {
 }
 
 #[tokio::test]
+async fn test_serve_photo_path_traversal() {
+    let env = setup_with_album();
+    assert_eq!(
+        get_status(env.router, "/photos/%2e%2e/photo-a.jpg").await,
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
+async fn test_album_path_traversal() {
+    let env = setup_with_album();
+    assert_eq!(
+        get_status(env.router, "/album/..").await,
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
+async fn test_photo_path_traversal() {
+    let env = setup_with_album();
+    assert_eq!(
+        get_status(env.router, "/album/test-album/%2e%2e").await,
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
+async fn test_thumb_path_traversal() {
+    let env = setup_with_album();
+    assert_eq!(
+        get_status(env.router, "/thumbs/%2e%2e/small/photo.jpg").await,
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
 async fn test_serve_photo_unknown_extension() {
     let dir = tempfile::tempdir().unwrap();
     let album_dir = dir.path().join("photos").join("test-album");
