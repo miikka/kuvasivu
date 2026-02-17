@@ -250,8 +250,34 @@ h1 {
         grid-template-columns: 1fr;
     }
 
+    .photo-topbar {
+        flex-direction: column;
+        gap: 0.15rem;
+    }
+
+    .photo-stage {
+        position: relative;
+    }
+
     .photo-nav {
-        width: 2.5rem;
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 3rem;
         font-size: 1.5rem;
+        background: transparent;
+        z-index: 1;
+    }
+
+    .photo-nav-prev {
+        left: 0;
+    }
+
+    .photo-nav-next {
+        right: 0;
+    }
+
+    .photo-main {
+        width: 100%;
     }
 }

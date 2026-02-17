@@ -1,5 +1,6 @@
 /target
 photos/
+cache/
 .claude/settings.local.json
 
 # claude-reliability managed
