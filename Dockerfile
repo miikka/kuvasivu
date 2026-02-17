@@ -18,6 +18,9 @@ WORKDIR /app
 COPY --from=builder /build/target/release/kuvasivu .
 COPY static/ static/
 
+RUN useradd -r -u 1001 kuvasivu
+USER 1001
+
 EXPOSE 3000
 
 ENV KUVASIVU_DATA_DIR=/data
