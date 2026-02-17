@@ -8,7 +8,7 @@
 - Rust/Axum backend with askama HTML templates
 - Filesystem-based album management: each album is a directory under `photos/`
 - Album metadata in `album.toml` (title, description, optional timespan)
-- Thumbnails generated on-demand via `image` crate, cached to `.thumbs/` inside each album dir
+- Thumbnails generated on-demand via `image` crate, cached to a separate cache dir (`KUVASIVU_CACHE_DIR`, defaults to `cache/` under data dir)
 - EXIF date extraction via `kamadak-exif` for auto-deriving album timespans
 
 ## Conventions
