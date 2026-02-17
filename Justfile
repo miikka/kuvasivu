@@ -9,6 +9,10 @@ docker-run: docker-build
       -v ./photos:/data/photos \
       kuvasivu
 
+lint:
+    cargo clippy
+    shellcheck tests/docker_test.sh
+
 run:
     cargo run
 
