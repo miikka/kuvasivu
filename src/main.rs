@@ -6,9 +6,14 @@ async fn main() {
     let data_dir = std::path::PathBuf::from(
         std::env::var("KUVASIVU_DATA_DIR").unwrap_or_else(|_| ".".to_string()),
     );
+    let cache_dir = std::path::PathBuf::from(
+        std::env::var("KUVASIVU_CACHE_DIR")
+            .unwrap_or_else(|_| data_dir.join("cache").to_string_lossy().to_string()),
+    );
     std::fs::create_dir_all(data_dir.join("photos")).ok();
+    std::fs::create_dir_all(&cache_dir).ok();
 
-    let app = kuvasivu::build_router(&data_dir);
+    let app = kuvasivu::build_router(&data_dir, &cache_dir);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
     tracing::info!("listening on http://localhost:3000");

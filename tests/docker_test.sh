@@ -19,14 +19,15 @@ EOF
 cat > "$DATA_DIR/photos/test-album/album.toml" <<'EOF'
 title = "Test Album"
 EOF
+cp "$(dirname "$0")/fixtures/DSCF0199.jpg" "$DATA_DIR/photos/test-album/photo.jpg"
 
 # Build the image
 echo "Building Docker image..."
 docker build -t "$IMAGE" .
 
-# Start the container
+# Start the container with data mounted read-only
 echo "Starting container..."
-docker run -d --name "$CONTAINER" -p 3099:3000 -v "$DATA_DIR:/data" "$IMAGE"
+docker run -d --name "$CONTAINER" -p 3099:3000 -v "$DATA_DIR:/data:ro" "$IMAGE"
 
 # Wait for the server to be ready
 echo "Waiting for server..."
@@ -68,6 +69,17 @@ if [ "$STATUS" = "200" ]; then
     echo "PASS: album page returns 200"
 else
     echo "FAIL: album page returned $STATUS"
+    exit 1
+fi
+
+# Test: thumbnail generation works with read-only data volume
+echo "Testing thumbnail generation..."
+STATUS="$(curl -sf -o /dev/null -w '%{http_code}' http://localhost:3099/thumbs/test-album/small/photo.jpg)"
+if [ "$STATUS" = "200" ]; then
+    echo "PASS: thumbnail generated successfully"
+else
+    echo "FAIL: thumbnail request returned $STATUS"
+    docker logs "$CONTAINER"
     exit 1
 fi
 

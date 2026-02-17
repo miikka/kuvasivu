@@ -12,6 +12,10 @@ docker-run: docker-build
 run:
     cargo run
 
+test:
+    cargo llvm-cov --show-missing-lines
+    ./tests/docker_test.sh
+
 test-cov:
     cargo llvm-cov --html
 

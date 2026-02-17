@@ -21,10 +21,15 @@ COPY static/ static/
 EXPOSE 3000
 
 ENV KUVASIVU_DATA_DIR=/data
+ENV KUVASIVU_CACHE_DIR=/cache
 
 # Mount your data directory at runtime:
 #   -v /path/to/data:/data
 # The data directory should contain site.toml and photos/
+#
+# Thumbnails are written to /cache (a separate volume):
+#   -v kuvasivu-cache:/cache
+VOLUME /cache
 
 ENTRYPOINT ["tini", "--"]
 CMD ["./kuvasivu"]

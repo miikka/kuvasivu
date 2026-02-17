@@ -37,7 +37,6 @@ impl IntoResponse for AppError {
     }
 }
 
-const THUMB_DIR: &str = ".thumbs";
 const SMALL_SIZE: u32 = 400;
 const MEDIUM_SIZE: u32 = 1200;
 
@@ -49,6 +48,7 @@ struct SiteConfig {
 #[derive(Clone)]
 struct AppState {
     photos_dir: Arc<PathBuf>,
+    cache_dir: Arc<PathBuf>,
     site_title: Arc<String>,
 }
 
@@ -104,11 +104,12 @@ fn load_site_config(data_dir: &Path) -> SiteConfig {
         .unwrap_or(SiteConfig { title: None })
 }
 
-pub fn build_router(data_dir: &Path) -> Router {
+pub fn build_router(data_dir: &Path, cache_dir: &Path) -> Router {
     let config = load_site_config(data_dir);
     let photos_dir = data_dir.join("photos");
     let state = AppState {
         photos_dir: Arc::new(photos_dir),
+        cache_dir: Arc::new(cache_dir.to_path_buf()),
         site_title: Arc::new(config.title.unwrap_or_else(|| "Kuvasivu".to_string())),
     };
 
@@ -223,7 +224,7 @@ async fn serve_thumb(
         return Err(StatusCode::NOT_FOUND);
     }
 
-    let thumb_dir = album_path.join(THUMB_DIR).join(&size);
+    let thumb_dir = state.cache_dir.join(&album).join(&size);
     let thumb_path = thumb_dir.join(&filename);
 
     if !thumb_path.is_file() {
