@@ -17,8 +17,9 @@ struct TestEnv {
 
 fn setup_with_album() -> TestEnv {
     let dir = tempfile::tempdir().unwrap();
-    let album_dir = dir.path().join("test-album");
-    fs::create_dir(&album_dir).unwrap();
+    let photos_dir = dir.path().join("photos");
+    let album_dir = photos_dir.join("test-album");
+    fs::create_dir_all(&album_dir).unwrap();
     fs::write(
         album_dir.join("album.toml"),
         "title = \"Test Album\"\ndescription = \"A test album.\"\ntimespan = \"January 2024\"\n",
@@ -31,7 +32,7 @@ fn setup_with_album() -> TestEnv {
     fs::write(album_dir.join("photo-b.jpg"), &fixture).unwrap();
     fs::write(album_dir.join("photo-c.jpg"), &fixture).unwrap();
 
-    let router = kuvasivu::build_router(dir.path().to_path_buf());
+    let router = kuvasivu::build_router(dir.path());
     TestEnv { _dir: dir, router }
 }
 
@@ -47,7 +48,8 @@ fn make_minimal_png() -> Vec<u8> {
 
 fn setup_empty() -> TestEnv {
     let dir = tempfile::tempdir().unwrap();
-    let router = kuvasivu::build_router(dir.path().to_path_buf());
+    fs::create_dir(dir.path().join("photos")).unwrap();
+    let router = kuvasivu::build_router(dir.path());
     TestEnv { _dir: dir, router }
 }
 
@@ -223,8 +225,8 @@ async fn test_serve_thumb_missing_photo() {
 #[tokio::test]
 async fn test_serve_thumb_cached() {
     let dir = tempfile::tempdir().unwrap();
-    let album_dir = dir.path().join("test-album");
-    fs::create_dir(&album_dir).unwrap();
+    let album_dir = dir.path().join("photos").join("test-album");
+    fs::create_dir_all(&album_dir).unwrap();
 
     let fixture = fs::read(fixture_jpg()).unwrap();
     fs::write(album_dir.join("photo.jpg"), &fixture).unwrap();
@@ -236,7 +238,7 @@ async fn test_serve_thumb_cached() {
     let thumb = img.resize(400, 400, image::imageops::FilterType::Lanczos3);
     thumb.save(thumb_dir.join("photo.jpg")).unwrap();
 
-    let router = kuvasivu::build_router(dir.path().to_path_buf());
+    let router = kuvasivu::build_router(dir.path());
     let (status, body, content_type) =
         get_bytes(router, "/thumbs/test-album/small/photo.jpg").await;
     assert_eq!(status, StatusCode::OK);
@@ -247,11 +249,11 @@ async fn test_serve_thumb_cached() {
 #[tokio::test]
 async fn test_serve_photo_png() {
     let dir = tempfile::tempdir().unwrap();
-    let album_dir = dir.path().join("test-album");
-    fs::create_dir(&album_dir).unwrap();
+    let album_dir = dir.path().join("photos").join("test-album");
+    fs::create_dir_all(&album_dir).unwrap();
     fs::write(album_dir.join("photo.png"), &make_minimal_png()).unwrap();
 
-    let router = kuvasivu::build_router(dir.path().to_path_buf());
+    let router = kuvasivu::build_router(dir.path());
     let (status, _, content_type) =
         get_bytes(router, "/photos/test-album/photo.png").await;
     assert_eq!(status, StatusCode::OK);
@@ -261,8 +263,8 @@ async fn test_serve_photo_png() {
 #[tokio::test]
 async fn test_serve_photo_webp() {
     let dir = tempfile::tempdir().unwrap();
-    let album_dir = dir.path().join("test-album");
-    fs::create_dir(&album_dir).unwrap();
+    let album_dir = dir.path().join("photos").join("test-album");
+    fs::create_dir_all(&album_dir).unwrap();
     // Create a minimal webp using image crate
     let img = image::RgbImage::new(1, 1);
     let mut buf = Vec::new();
@@ -270,7 +272,7 @@ async fn test_serve_photo_webp() {
     img.write_to(&mut cursor, image::ImageFormat::WebP).unwrap();
     fs::write(album_dir.join("photo.webp"), &buf).unwrap();
 
-    let router = kuvasivu::build_router(dir.path().to_path_buf());
+    let router = kuvasivu::build_router(dir.path());
     let (status, _, content_type) =
         get_bytes(router, "/photos/test-album/photo.webp").await;
     assert_eq!(status, StatusCode::OK);
@@ -280,11 +282,11 @@ async fn test_serve_photo_webp() {
 #[tokio::test]
 async fn test_serve_photo_unknown_extension() {
     let dir = tempfile::tempdir().unwrap();
-    let album_dir = dir.path().join("test-album");
-    fs::create_dir(&album_dir).unwrap();
+    let album_dir = dir.path().join("photos").join("test-album");
+    fs::create_dir_all(&album_dir).unwrap();
     fs::write(album_dir.join("data.bin"), b"binary data").unwrap();
 
-    let router = kuvasivu::build_router(dir.path().to_path_buf());
+    let router = kuvasivu::build_router(dir.path());
     let (status, _, content_type) =
         get_bytes(router, "/photos/test-album/data.bin").await;
     assert_eq!(status, StatusCode::OK);

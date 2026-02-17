@@ -20,9 +20,11 @@ COPY static/ static/
 
 EXPOSE 3000
 
-# Mount site.toml and photos/ at runtime:
-#   -v /path/to/site.toml:/app/site.toml
-#   -v /path/to/photos:/app/photos
+ENV KUVASIVU_DATA_DIR=/data
+
+# Mount your data directory at runtime:
+#   -v /path/to/data:/data
+# The data directory should contain site.toml and photos/
 
 ENTRYPOINT ["tini", "--"]
 CMD ["./kuvasivu"]

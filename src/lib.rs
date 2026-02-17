@@ -97,15 +97,16 @@ struct PhotoTemplate {
     exif: ExifInfo,
 }
 
-fn load_site_config() -> SiteConfig {
-    std::fs::read_to_string("site.toml")
+fn load_site_config(data_dir: &Path) -> SiteConfig {
+    std::fs::read_to_string(data_dir.join("site.toml"))
         .ok()
         .and_then(|s| toml::from_str(&s).ok())
         .unwrap_or(SiteConfig { title: None })
 }
 
-pub fn build_router(photos_dir: PathBuf) -> Router {
-    let config = load_site_config();
+pub fn build_router(data_dir: &Path) -> Router {
+    let config = load_site_config(data_dir);
+    let photos_dir = data_dir.join("photos");
     let state = AppState {
         photos_dir: Arc::new(photos_dir),
         site_title: Arc::new(config.title.unwrap_or_else(|| "Kuvasivu".to_string())),
