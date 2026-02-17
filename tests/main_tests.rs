@@ -180,6 +180,28 @@ async fn test_serve_photo() {
 }
 
 #[tokio::test]
+async fn test_serve_photo_cache_header() {
+    let env = setup_with_album();
+    let response = env
+        .router
+        .oneshot(
+            Request::builder()
+                .uri("/photos/test-album/photo-a.jpg")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let cache_control = response
+        .headers()
+        .get("cache-control")
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert_eq!(cache_control, "public, max-age=31536000, immutable");
+}
+
+#[tokio::test]
 async fn test_serve_photo_missing() {
     let env = setup_with_album();
     assert_eq!(

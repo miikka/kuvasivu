@@ -265,7 +265,16 @@ async fn serve_file(path: &Path) -> Result<impl IntoResponse, StatusCode> {
         _ => "application/octet-stream",
     };
 
-    Ok(([(axum::http::header::CONTENT_TYPE, content_type)], body))
+    Ok((
+        [
+            (axum::http::header::CONTENT_TYPE, content_type),
+            (
+                axum::http::header::CACHE_CONTROL,
+                "public, max-age=31536000, immutable",
+            ),
+        ],
+        body,
+    ))
 }
 
 fn scan_albums(photos_dir: &Path) -> Vec<Album> {
