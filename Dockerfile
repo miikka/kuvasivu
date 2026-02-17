@@ -9,6 +9,8 @@ RUN cargo build --release
 
 FROM debian:bookworm-slim
 
+LABEL org.opencontainers.image.source=https://github.com/miikka/kuvasivu
+
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tini \
     && rm -rf /var/lib/apt/lists/*
 
