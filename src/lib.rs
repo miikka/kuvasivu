@@ -1,5 +1,6 @@
 mod exif;
 
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -104,6 +105,12 @@ fn load_site_config(data_dir: &Path) -> SiteConfig {
         .unwrap_or(SiteConfig { title: None })
 }
 
+/// Validates that a user-supplied path segment is a plain filename with no
+/// directory traversal components (e.g. `..`, `/`, `\`).
+fn is_safe_path_segment(segment: &str) -> bool {
+    Path::new(segment).file_name() == Some(OsStr::new(segment))
+}
+
 pub fn build_router(data_dir: &Path, cache_dir: &Path) -> Router {
     let config = load_site_config(data_dir);
     let photos_dir = data_dir.join("photos");
@@ -133,6 +140,9 @@ async fn album(
     State(state): State<AppState>,
     extract::Path(slug): extract::Path<String>,
 ) -> Result<impl IntoResponse, AppError> {
+    if !is_safe_path_segment(&slug) {
+        return Err(AppError::NotFound);
+    }
     let album_path = state.photos_dir.join(&slug);
     if !album_path.is_dir() {
         return Err(AppError::NotFound);
@@ -149,6 +159,9 @@ async fn photo(
     State(state): State<AppState>,
     extract::Path((slug, filename)): extract::Path<(String, String)>,
 ) -> Result<impl IntoResponse, AppError> {
+    if !is_safe_path_segment(&slug) || !is_safe_path_segment(&filename) {
+        return Err(AppError::NotFound);
+    }
     let album_path = state.photos_dir.join(&slug);
     if !album_path.is_dir() {
         return Err(AppError::NotFound);
@@ -204,6 +217,9 @@ async fn serve_photo(
     State(state): State<AppState>,
     extract::Path((album, filename)): extract::Path<(String, String)>,
 ) -> Result<impl IntoResponse, StatusCode> {
+    if !is_safe_path_segment(&album) || !is_safe_path_segment(&filename) {
+        return Err(StatusCode::NOT_FOUND);
+    }
     let path = state.photos_dir.join(&album).join(&filename);
     serve_file(&path).await
 }
@@ -212,6 +228,9 @@ async fn serve_thumb(
     State(state): State<AppState>,
     extract::Path((album, size, filename)): extract::Path<(String, String, String)>,
 ) -> Result<impl IntoResponse, StatusCode> {
+    if !is_safe_path_segment(&album) || !is_safe_path_segment(&filename) {
+        return Err(StatusCode::NOT_FOUND);
+    }
     let max_dim = match size.as_str() {
         "small" => SMALL_SIZE,
         "medium" => MEDIUM_SIZE,
@@ -608,5 +627,69 @@ mod tests {
     fn app_error_from_askama() {
         let err: AppError = askama::Error::Custom(Box::new(std::fmt::Error)).into();
         matches!(err, AppError::Render);
+    }
+
+    #[test]
+    fn safe_path_segment_accepts_normal_names() {
+        assert!(is_safe_path_segment("my-album"));
+        assert!(is_safe_path_segment("photo.jpg"));
+        assert!(is_safe_path_segment("album_2024"));
+        assert!(is_safe_path_segment(".hidden"));
+    }
+
+    #[test]
+    fn safe_path_segment_rejects_traversal() {
+        assert!(!is_safe_path_segment(".."));
+        assert!(!is_safe_path_segment("../etc"));
+        assert!(!is_safe_path_segment("foo/bar"));
+        assert!(!is_safe_path_segment("."));
+        assert!(!is_safe_path_segment(""));
+    }
+
+    #[tokio::test]
+    async fn path_traversal_blocked() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::ServiceExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let photos_dir = dir.path().join("photos");
+        fs::create_dir(&photos_dir).unwrap();
+        let album_dir = photos_dir.join("test-album");
+        fs::create_dir(&album_dir).unwrap();
+        fs::write(album_dir.join("photo.jpg"), b"fake jpg").unwrap();
+
+        // Place a secret file outside photos_dir
+        fs::write(dir.path().join("secret.txt"), b"secret data").unwrap();
+
+        let cache_dir = dir.path().join("cache");
+        fs::create_dir(&cache_dir).unwrap();
+
+        let app = build_router(dir.path(), &cache_dir);
+
+        // Traversal via ".." in album segment should be blocked
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/photos/../secret.txt")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        // Legitimate request should still work
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/photos/test-album/photo.jpg")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
     }
 }
