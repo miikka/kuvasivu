@@ -123,13 +123,13 @@ h1 {
 .photo-page main {
     max-width: none;
     padding: 0;
-    height: 100vh;
+    height: 100dvh;
 }
 
 .photo-page .photo-viewer {
     display: flex;
     flex-direction: column;
-    height: 100vh;
+    height: 100dvh;
     background: #000;
     color: #fff;
 }
@@ -182,9 +182,11 @@ h1 {
     user-select: none;
 }
 
-.photo-nav:hover {
-    background: rgba(255, 255, 255, 0.1);
-    color: #fff;
+@media (hover: hover) {
+    .photo-nav:hover {
+        background: rgba(255, 255, 255, 0.1);
+        color: #fff;
+    }
 }
 
 .photo-nav-disabled {
