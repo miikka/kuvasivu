@@ -2,7 +2,6 @@ mod exif;
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use askama::Template;
 use axum::extract::{self, State};
@@ -48,9 +47,9 @@ struct SiteConfig {
 
 #[derive(Clone)]
 struct AppState {
-    photos_dir: Arc<PathBuf>,
-    cache_dir: Arc<PathBuf>,
-    site_title: Arc<String>,
+    photos_dir: PathBuf,
+    cache_dir: PathBuf,
+    site_title: String,
 }
 
 #[derive(Deserialize, Default)]
@@ -115,9 +114,9 @@ pub fn build_router(data_dir: &Path, cache_dir: &Path) -> Router {
     let config = load_site_config(data_dir);
     let photos_dir = data_dir.join("photos");
     let state = AppState {
-        photos_dir: Arc::new(photos_dir),
-        cache_dir: Arc::new(cache_dir.to_path_buf()),
-        site_title: Arc::new(config.title.unwrap_or_else(|| "Kuvasivu".to_string())),
+        photos_dir,
+        cache_dir: cache_dir.to_path_buf(),
+        site_title: config.title.unwrap_or_else(|| "Kuvasivu".to_string()),
     };
 
     Router::new()
