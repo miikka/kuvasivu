@@ -13,5 +13,6 @@
     <main>
         {% block content %}{% endblock %}
     </main>
+    {% if let Some(snippet) = footer_snippet %}{{ snippet|safe }}{% endif %}
 </body>
 </html>

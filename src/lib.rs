@@ -43,6 +43,7 @@ const MEDIUM_SIZE: u32 = 1200;
 #[derive(Deserialize)]
 struct SiteConfig {
     title: Option<String>,
+    footer_snippet: Option<String>,
 }
 
 #[derive(Clone)]
@@ -50,6 +51,7 @@ struct AppState {
     photos_dir: PathBuf,
     cache_dir: PathBuf,
     site_title: String,
+    footer_snippet: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -75,6 +77,7 @@ struct Photo {
 #[template(path = "index.html")]
 struct IndexTemplate {
     site_title: String,
+    footer_snippet: Option<String>,
     albums: Vec<Album>,
 }
 
@@ -82,6 +85,7 @@ struct IndexTemplate {
 #[template(path = "album.html")]
 struct AlbumTemplate {
     site_title: String,
+    footer_snippet: Option<String>,
     album: Album,
     photos: Vec<Photo>,
 }
@@ -90,6 +94,7 @@ struct AlbumTemplate {
 #[template(path = "photo.html")]
 struct PhotoTemplate {
     site_title: String,
+    footer_snippet: Option<String>,
     album: Album,
     photo: Photo,
     prev: Option<Photo>,
@@ -101,7 +106,7 @@ fn load_site_config(data_dir: &Path) -> SiteConfig {
     std::fs::read_to_string(data_dir.join("site.toml"))
         .ok()
         .and_then(|s| toml::from_str(&s).ok())
-        .unwrap_or(SiteConfig { title: None })
+        .unwrap_or(SiteConfig { title: None, footer_snippet: None })
 }
 
 /// Validates that a user-supplied path segment is a plain filename with no
@@ -117,6 +122,7 @@ pub fn build_router(data_dir: &Path, cache_dir: &Path) -> Router {
         photos_dir,
         cache_dir: cache_dir.to_path_buf(),
         site_title: config.title.unwrap_or_else(|| "Kuvasivu".to_string()),
+        footer_snippet: config.footer_snippet,
     };
 
     Router::new()
@@ -132,7 +138,8 @@ pub fn build_router(data_dir: &Path, cache_dir: &Path) -> Router {
 async fn index(State(state): State<AppState>) -> Result<impl IntoResponse, AppError> {
     let albums = scan_albums(&state.photos_dir);
     let site_title = state.site_title.to_string();
-    Ok(Html((IndexTemplate { site_title, albums }).render()?))
+    let footer_snippet = state.footer_snippet.clone();
+    Ok(Html((IndexTemplate { site_title, footer_snippet, albums }).render()?))
 }
 
 async fn album(
@@ -151,7 +158,8 @@ async fn album(
     let album = load_album(&slug, &album_path, &photos);
 
     let site_title = state.site_title.to_string();
-    Ok(Html((AlbumTemplate { site_title, album, photos }).render()?))
+    let footer_snippet = state.footer_snippet.clone();
+    Ok(Html((AlbumTemplate { site_title, footer_snippet, album, photos }).render()?))
 }
 
 async fn photo(
@@ -199,9 +207,11 @@ async fn photo(
     };
 
     let site_title = state.site_title.to_string();
+    let footer_snippet = state.footer_snippet.clone();
     Ok(Html(
         (PhotoTemplate {
             site_title,
+            footer_snippet,
             album,
             photo,
             prev,
