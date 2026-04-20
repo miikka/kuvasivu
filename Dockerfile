@@ -22,7 +22,9 @@ WORKDIR /app
 COPY --from=builder /build/target/release/kuvasivu .
 COPY static/ static/
 
-RUN useradd -r -u 1001 kuvasivu
+RUN useradd -r -u 1001 kuvasivu \
+    && mkdir -p /cache \
+    && chown 1001:1001 /cache
 USER 1001
 
 EXPOSE 3000
