@@ -13,7 +13,10 @@ docker-run: docker-build
       -v ./photos:/data/photos \
       kuvasivu
 
+ci: test lint
+
 lint:
+    cargo fmt --check
     cargo clippy
     shellcheck tests/docker_test.sh
 
@@ -21,7 +24,7 @@ run:
     cargo run
 
 test:
-    cargo llvm-cov --show-missing-lines
+    cargo llvm-cov nextest --show-missing-lines
     ./tests/docker_test.sh
 
 test-cov:
