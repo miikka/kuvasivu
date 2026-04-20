@@ -17,7 +17,7 @@ use image::imageops::FilterType;
 use serde::Deserialize;
 use tower_http::services::ServeDir;
 
-use exif::{ExifInfo, read_exif_info};
+use exif::{read_exif_info, ExifInfo};
 
 enum AppError {
     Render,
@@ -33,9 +33,11 @@ impl From<askama::Error> for AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         match self {
-            AppError::Render => {
-                (StatusCode::INTERNAL_SERVER_ERROR, "Failed to render template").into_response()
-            }
+            AppError::Render => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to render template",
+            )
+                .into_response(),
             AppError::NotFound => StatusCode::NOT_FOUND.into_response(),
         }
     }
@@ -70,6 +72,7 @@ struct Album {
     title: String,
     description: String,
     timespan: String,
+    sort_date: Option<String>,
     cover: Option<String>,
 }
 
@@ -110,7 +113,10 @@ fn load_site_config(data_dir: &Path) -> SiteConfig {
     std::fs::read_to_string(data_dir.join("site.toml"))
         .ok()
         .and_then(|s| toml::from_str(&s).ok())
-        .unwrap_or(SiteConfig { title: None, footer_snippet: None })
+        .unwrap_or(SiteConfig {
+            title: None,
+            footer_snippet: None,
+        })
 }
 
 /// Validates that a user-supplied path segment is a plain filename with no
@@ -143,7 +149,14 @@ async fn index(State(state): State<AppState>) -> Result<impl IntoResponse, AppEr
     let albums = scan_albums(&state.photos_dir);
     let site_title = state.site_title.to_string();
     let footer_snippet = state.footer_snippet.clone();
-    Ok(Html((IndexTemplate { site_title, footer_snippet, albums }).render()?))
+    Ok(Html(
+        (IndexTemplate {
+            site_title,
+            footer_snippet,
+            albums,
+        })
+        .render()?,
+    ))
 }
 
 async fn album(
@@ -163,7 +176,15 @@ async fn album(
 
     let site_title = state.site_title.to_string();
     let footer_snippet = state.footer_snippet.clone();
-    Ok(Html((AlbumTemplate { site_title, footer_snippet, album, photos }).render()?))
+    Ok(Html(
+        (AlbumTemplate {
+            site_title,
+            footer_snippet,
+            album,
+            photos,
+        })
+        .render()?,
+    ))
 }
 
 async fn photo(
@@ -325,8 +346,20 @@ fn scan_albums(photos_dir: &Path) -> Vec<Album> {
         albums.push(load_album(&slug, &path, &photos));
     }
 
-    albums.sort_by(|a, b| a.title.cmp(&b.title));
+    albums.sort_by(|a, b| match (&a.sort_date, &b.sort_date) {
+        (None, None) => a.title.cmp(&b.title),
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (Some(ad), Some(bd)) => bd.cmp(ad),
+    });
     albums
+}
+
+fn derive_sort_date(album_path: &Path, photos: &[Photo]) -> Option<String> {
+    photos
+        .iter()
+        .filter_map(|p| exif::read_exif_date(&album_path.join(&p.filename)))
+        .max()
 }
 
 fn load_album(slug: &str, album_path: &Path, photos: &[Photo]) -> Album {
@@ -338,6 +371,7 @@ fn load_album(slug: &str, album_path: &Path, photos: &[Photo]) -> Album {
         timespan: meta
             .timespan
             .unwrap_or_else(|| derive_timespan(album_path, photos)),
+        sort_date: derive_sort_date(album_path, photos),
         slug: slug.to_string(),
         cover,
     }
@@ -499,10 +533,7 @@ mod tests {
             "2024:06:15 12:00:00".to_string(),
             "2024:09:20 12:00:00".to_string(),
         ];
-        assert_eq!(
-            format_date_range(&dates),
-            "June 2024 – September 2024"
-        );
+        assert_eq!(format_date_range(&dates), "June 2024 – September 2024");
     }
 
     #[test]
@@ -659,4 +690,61 @@ mod tests {
         assert!(!is_safe_path_segment(""));
     }
 
+    #[test]
+    fn derive_sort_date_no_photos() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(derive_sort_date(dir.path(), &[]), None);
+    }
+
+    #[test]
+    fn derive_sort_date_no_exif() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("photo.jpg"), b"not a real jpeg").unwrap();
+        let photos = vec![Photo {
+            filename: "photo.jpg".to_string(),
+        }];
+        assert_eq!(derive_sort_date(dir.path(), &photos), None);
+    }
+
+    #[test]
+    fn derive_sort_date_with_exif() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::copy(fixture_path(), dir.path().join("photo.jpg")).unwrap();
+        let photos = vec![Photo {
+            filename: "photo.jpg".to_string(),
+        }];
+        assert_eq!(
+            derive_sort_date(dir.path(), &photos).as_deref(),
+            Some("2026-02-01 15:01:06")
+        );
+    }
+
+    #[test]
+    fn scan_albums_sorts_dated_before_undated() {
+        let dir = tempfile::tempdir().unwrap();
+        let dated = dir.path().join("z-album");
+        let undated = dir.path().join("a-album");
+        fs::create_dir(&dated).unwrap();
+        fs::create_dir(&undated).unwrap();
+        fs::copy(fixture_path(), dated.join("photo.jpg")).unwrap();
+        let albums = scan_albums(dir.path());
+        assert_eq!(albums[0].slug, "z-album");
+        assert_eq!(albums[1].slug, "a-album");
+    }
+
+    #[test]
+    fn scan_albums_sorts_dated_newest_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let older = dir.path().join("older-album");
+        let newer = dir.path().join("newer-album");
+        fs::create_dir(&older).unwrap();
+        fs::create_dir(&newer).unwrap();
+        let newer_fixture =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/DSCF0263.jpg"); // 2026-03-20
+        fs::copy(&newer_fixture, newer.join("photo.jpg")).unwrap();
+        fs::copy(fixture_path(), older.join("photo.jpg")).unwrap(); // 2026-02-01
+        let albums = scan_albums(dir.path());
+        assert_eq!(albums[0].slug, "newer-album");
+        assert_eq!(albums[1].slug, "older-album");
+    }
 }

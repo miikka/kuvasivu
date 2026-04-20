@@ -15,3 +15,4 @@ cache/
 .claude-reliability/
 
 site.toml
+.DS_Store

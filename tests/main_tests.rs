@@ -285,8 +285,7 @@ async fn test_serve_photo_png() {
     fs::write(album_dir.join("photo.png"), &make_minimal_png()).unwrap();
 
     let router = kuvasivu::build_router(dir.path(), &dir.path().join("cache"));
-    let (status, _, content_type) =
-        get_bytes(router, "/photos/test-album/photo.png").await;
+    let (status, _, content_type) = get_bytes(router, "/photos/test-album/photo.png").await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(content_type, "image/png");
 }
@@ -304,8 +303,7 @@ async fn test_serve_photo_webp() {
     fs::write(album_dir.join("photo.webp"), &buf).unwrap();
 
     let router = kuvasivu::build_router(dir.path(), &dir.path().join("cache"));
-    let (status, _, content_type) =
-        get_bytes(router, "/photos/test-album/photo.webp").await;
+    let (status, _, content_type) = get_bytes(router, "/photos/test-album/photo.webp").await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(content_type, "image/webp");
 }
@@ -354,8 +352,7 @@ async fn test_serve_photo_unknown_extension() {
     fs::write(album_dir.join("data.bin"), b"binary data").unwrap();
 
     let router = kuvasivu::build_router(dir.path(), &dir.path().join("cache"));
-    let (status, _, content_type) =
-        get_bytes(router, "/photos/test-album/data.bin").await;
+    let (status, _, content_type) = get_bytes(router, "/photos/test-album/data.bin").await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(content_type, "application/octet-stream");
 }

@@ -51,9 +51,7 @@ impl ExifInfo {
 pub fn read_exif(path: &Path) -> Option<exif::Exif> {
     let file = std::fs::File::open(path).ok()?;
     let mut bufreader = std::io::BufReader::new(file);
-    exif::Reader::new()
-        .read_from_container(&mut bufreader)
-        .ok()
+    exif::Reader::new().read_from_container(&mut bufreader).ok()
 }
 
 fn clean_exif_value(raw: &str) -> Option<String> {
@@ -296,7 +294,10 @@ mod tests {
 
     #[test]
     fn format_year_month_invalid_month() {
-        assert_eq!(format_year_month("2024:13:01 00:00:00"), "2024:13:01 00:00:00");
+        assert_eq!(
+            format_year_month("2024:13:01 00:00:00"),
+            "2024:13:01 00:00:00"
+        );
     }
 
     #[test]
