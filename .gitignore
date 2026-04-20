@@ -13,3 +13,5 @@ cache/
 .claude/*.local.json
 .claude/*.local
 .claude-reliability/
+
+site.toml
