@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2026 Miikka Koskinen
+
+SPDX-License-Identifier: MIT
+-->
+
 # Kuvasivu
 
 A photography portfolio site: put some JPEGs into a directory, receive a gallery.
@@ -56,6 +62,10 @@ docker run -p 3000:3000 -v /path/to/data:/data:ro -v kuvasivu-cache:/cache kuvas
 
 The data volume (`/data`) can be mounted read-only. Thumbnails are written to a separate `/cache` volume.
 
-## License
+## Copyright and license
 
-See [LICENSE](LICENSE).
+> Copyright 2026 Miikka Koskinen.
+
+This project is distributed under the [MIT license](./LICENSES/MIT.txt).
+See the SPDX annotations for each file for details.
+

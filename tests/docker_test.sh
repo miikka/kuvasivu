@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+
+# SPDX-FileCopyrightText: 2026 Miikka Koskinen
+#
+# SPDX-License-Identifier: MIT
+
 set -euo pipefail
 
 IMAGE="kuvasivu-test"

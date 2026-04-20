@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Miikka Koskinen
+//
+// SPDX-License-Identifier: MIT
+
 #[cfg(not(coverage))]
 #[tokio::main]
 async fn main() {
