@@ -8,7 +8,7 @@ docker-build:
     docker build -t kuvasivu .
 
 docker-run: docker-build
-    docker run --rm -p 3000:3000 \
+    docker run --rm -p 3000:3000 --init \
       -v ./site.toml:/data/site.toml \
       -v ./photos:/data/photos \
       kuvasivu

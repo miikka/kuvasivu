@@ -57,10 +57,12 @@ title = "My Portfolio"
 ## Docker
 
 ```
-docker run -p 3000:3000 -v /path/to/data:/data:ro -v kuvasivu-cache:/cache kuvasivu
+docker run -p 3000:3000 -v /path/to/data:/data:ro -v kuvasivu-cache:/cache --init kuvasivu
 ```
 
-The data volume (`/data`) can be mounted read-only. Thumbnails are written to a separate `/cache` volume.
+The data volume (`/data`) can be mounted read-only.
+Thumbnails are written to a separate `/cache` volume.
+You'll want to use `--init` so that Ctrl-C and signal handling works as usual.
 
 ## Copyright and license
 

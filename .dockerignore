@@ -7,3 +7,5 @@ photos/
 .git/
 .jj/
 .claude/
+Dockerfile
+.dockerignore

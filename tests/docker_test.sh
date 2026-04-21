@@ -32,7 +32,7 @@ docker build -t "$IMAGE" .
 
 # Start the container with data mounted read-only
 echo "Starting container..."
-docker run -d --name "$CONTAINER" -p 3099:3000 -v "$DATA_DIR:/data:ro" "$IMAGE"
+docker run --init -d --name "$CONTAINER" -p 3099:3000 -v "$DATA_DIR:/data:ro" "$IMAGE"
 
 # Wait for the server to be ready
 echo "Waiting for server..."

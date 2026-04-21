@@ -2,32 +2,42 @@
 #
 # SPDX-License-Identifier: MIT
 
-FROM rust:1-bookworm AS builder
+# Customization point: set the name of the binary built by Cargo.
+ARG BINARY_NAME=kuvasivu
 
+FROM rust:1-trixie AS chef
+RUN cargo install --locked cargo-chef
 WORKDIR /build
-COPY Cargo.toml Cargo.lock ./
-COPY src/ src/
-COPY templates/ templates/
 
-RUN cargo build --release
+FROM chef AS planner
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
 
-FROM debian:bookworm-slim
+FROM chef AS builder
+ARG BINARY_NAME
+COPY --from=planner /build/recipe.json recipe.json
+RUN cargo chef cook --release --recipe-path recipe.json
+COPY . .
+RUN cargo build --release --bin $BINARY_NAME
+RUN mkdir -p /empty
 
+################################################################################
+
+FROM gcr.io/distroless/cc-debian13:nonroot
+
+ARG BINARY_NAME
+
+# Customization point: add labels you need, for example to indicate the repo location
 LABEL org.opencontainers.image.source=https://github.com/miikka/kuvasivu
 
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tini \
-    && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /app
-COPY --from=builder /build/target/release/kuvasivu .
+COPY --from=builder /build/target/release/$BINARY_NAME /app/app
+
+# Customization point: add an empty directory owned by the nonroot user
+COPY --from=builder --chown=65532:65532 /empty /cache
+
+# Customization point: if you need files other than the binary, copy them into the image here.
 COPY static/ static/
-
-RUN useradd -r -u 1001 kuvasivu \
-    && mkdir -p /cache \
-    && chown 1001:1001 /cache
-USER 1001
-
-EXPOSE 3000
 
 ENV KUVASIVU_DATA_DIR=/data
 ENV KUVASIVU_CACHE_DIR=/cache
@@ -40,5 +50,4 @@ ENV KUVASIVU_CACHE_DIR=/cache
 #   -v kuvasivu-cache:/cache
 VOLUME /cache
 
-ENTRYPOINT ["tini", "--"]
-CMD ["./kuvasivu"]
+CMD ["/app/app"]
