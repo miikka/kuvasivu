@@ -302,7 +302,7 @@ fn generate_thumbnail(
     Ok(())
 }
 
-async fn serve_file(path: &Path) -> Result<impl IntoResponse, StatusCode> {
+async fn serve_file(path: &Path) -> Result<impl IntoResponse + use<>, StatusCode> {
     if !path.is_file() {
         return Err(StatusCode::NOT_FOUND);
     }
