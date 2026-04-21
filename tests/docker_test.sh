@@ -9,6 +9,7 @@ set -euo pipefail
 IMAGE="kuvasivu-test"
 CONTAINER="kuvasivu-test-$$"
 DATA_DIR="$(mktemp -d)"
+chmod 755 "$DATA_DIR"
 
 cleanup() {
     docker rm -f "$CONTAINER" 2>/dev/null || true
