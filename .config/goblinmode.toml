@@ -3,3 +3,9 @@
 # SPDX-License-Identifier: MIT
 
 serve_ports = [3000]
+
+# uidmap is required for podman to work in rootless mode
+# passt is required for pasta networking
+# catatonit is required for `podman run --init`
+packages = ["podman", "uidmap", "passt", "catatonit"]
+cargo_packages = ["cargo-nextest", "cargo-llvm-cov"]
