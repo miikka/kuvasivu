@@ -56,8 +56,14 @@ title = "My Portfolio"
 
 ## Docker
 
+A container image for Kuvasivu is published on GHCR at `ghcr.io/miikka/kuvasivu:latest`.
+
 ```
-docker run -p 3000:3000 -v /path/to/data:/data:ro -v kuvasivu-cache:/cache --init kuvasivu
+docker run -p 3000:3000 \
+  -v /path/to/data:/data:ro \
+  -v kuvasivu-cache:/cache \
+  --init \
+  ghcr.io/miikka/kuvasivu:latest
 ```
 
 The data volume (`/data`) can be mounted read-only.

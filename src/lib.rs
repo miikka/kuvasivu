@@ -8,16 +8,16 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use askama::Template;
+use axum::Router;
 use axum::extract::{self, State};
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
-use axum::Router;
 use image::imageops::FilterType;
 use serde::Deserialize;
 use tower_http::services::ServeDir;
 
-use exif::{read_exif_info, ExifInfo};
+use exif::{ExifInfo, read_exif_info};
 
 enum AppError {
     Render,
