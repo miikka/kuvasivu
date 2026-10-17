@@ -27,3 +27,12 @@ insta = { version = "1", features = ["redactions"] }
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 tempfile = "3"
+
+# Image decoding, resizing and AVIF encoding are 10-100x slower unoptimized,
+# which makes `cargo run` unusable for browsing albums. rav1e's generic encoder
+# code is instantiated in this crate, so it needs some optimization too.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
