@@ -13,6 +13,7 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)'] }
 [dependencies]
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["io"] }
 askama = "0.15"
 image = { version = "0.25", default-features = false, features = ["avif", "jpeg", "png", "rayon", "webp"] }
 kamadak-exif = "0.6"

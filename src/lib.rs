@@ -13,6 +13,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use askama::Template;
 use axum::Router;
+use axum::body::Body;
 use axum::extract::{self, State};
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
@@ -21,7 +22,8 @@ use image::codecs::avif::AvifEncoder;
 use image::imageops::FilterType;
 use image::{DynamicImage, ImageFormat};
 use serde::Deserialize;
-use tokio::sync::{Notify, Semaphore};
+use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore};
+use tokio_util::io::ReaderStream;
 use tower_http::services::ServeDir;
 
 use exif::{ExifInfo, read_exif_info};
@@ -63,6 +65,8 @@ const AVIF_QUALITY: u8 = 80;
 // the AVIF encoder already uses every core, so more parallelism only costs
 // memory. Unbounded, a big uncached album page ran the server out of memory.
 const MAX_CONCURRENT_THUMBNAILS: usize = 2;
+const MAX_THUMBNAIL_REQUESTS: usize = 64;
+const THUMBNAIL_WAIT_TIMEOUT: Duration = Duration::from_secs(10);
 
 // Thumbnails are written to `<thumb dir>/.tmp-N-<name>` and renamed into place.
 const TMP_PREFIX: &str = ".tmp-";
@@ -93,6 +97,7 @@ struct AppState {
     site_title: String,
     footer_snippet: Option<String>,
     thumbnail_permits: Arc<Semaphore>,
+    thumbnail_requests: Arc<Semaphore>,
     /// Wakes up the background thumbnail worker.
     thumbnail_wakeup: Arc<Notify>,
     worker_status: Arc<Mutex<WorkerStatus>>,
@@ -246,6 +251,13 @@ fn is_safe_path_segment(segment: &str) -> bool {
     Path::new(segment).file_name() == Some(OsStr::new(segment))
 }
 
+fn is_photo_filename(filename: &str) -> bool {
+    let lower = filename.to_ascii_lowercase();
+    [".jpg", ".jpeg", ".png", ".webp"]
+        .iter()
+        .any(|extension| lower.ends_with(extension))
+}
+
 /// Builds the router without the background thumbnail worker: thumbnails are
 /// then only rendered on request, and only as JPEG.
 pub fn build_router(data_dir: &Path, cache_dir: &Path) -> Router {
@@ -264,6 +276,7 @@ pub fn build_app(data_dir: &Path, cache_dir: &Path) -> (Router, ThumbnailWorker)
         site_title: config.title.unwrap_or_else(|| "Kuvasivu".to_string()),
         footer_snippet: config.footer_snippet,
         thumbnail_permits: Arc::new(Semaphore::new(MAX_CONCURRENT_THUMBNAILS)),
+        thumbnail_requests: Arc::new(Semaphore::new(MAX_THUMBNAIL_REQUESTS)),
         thumbnail_wakeup: Arc::new(Notify::new()),
         worker_status: Arc::default(),
     };
@@ -481,7 +494,10 @@ async fn serve_photo(
     State(state): State<AppState>,
     extract::Path((album, filename)): extract::Path<(String, String)>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    if !is_safe_path_segment(&album) || !is_safe_path_segment(&filename) {
+    if !is_safe_path_segment(&album)
+        || !is_safe_path_segment(&filename)
+        || !is_photo_filename(&filename)
+    {
         return Err(StatusCode::NOT_FOUND);
     }
     let path = state.photos_dir.join(&album).join(&filename);
@@ -514,12 +530,15 @@ async fn serve_thumb(
         if filename.ends_with(".avif") {
             return Err(StatusCode::NOT_FOUND);
         }
-        let permit = state
-            .thumbnail_permits
+        // Cap both active and queued requests before waiting for an encoder.
+        let _request = state
+            .thumbnail_requests
             .clone()
-            .acquire_owned()
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            .try_acquire_owned()
+            .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
+        let permit =
+            acquire_thumbnail_permit(state.thumbnail_permits.clone(), THUMBNAIL_WAIT_TIMEOUT)
+                .await?;
         // Another request may have generated it while we waited for a permit.
         if !thumb_path.is_file() {
             let thumb_path = thumb_path.clone();
@@ -536,6 +555,16 @@ async fn serve_thumb(
     }
 
     serve_file(&thumb_path).await
+}
+
+async fn acquire_thumbnail_permit(
+    semaphore: Arc<Semaphore>,
+    wait: Duration,
+) -> Result<OwnedSemaphorePermit, StatusCode> {
+    tokio::time::timeout(wait, semaphore.acquire_owned())
+        .await
+        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
 fn thumb_max_dim(size: &str) -> Option<u32> {
@@ -669,11 +698,15 @@ async fn serve_file(path: &Path) -> Result<impl IntoResponse + use<>, StatusCode
         return Err(StatusCode::NOT_FOUND);
     }
 
-    let body = tokio::fs::read(path)
+    let file = tokio::fs::File::open(path)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let content_type = match path.extension().and_then(|e| e.to_str()) {
+    let extension = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase);
+    let content_type = match extension.as_deref() {
         Some("jpg" | "jpeg") => "image/jpeg",
         Some("png") => "image/png",
         Some("webp") => "image/webp",
@@ -689,7 +722,7 @@ async fn serve_file(path: &Path) -> Result<impl IntoResponse + use<>, StatusCode
                 "public, max-age=31536000, immutable",
             ),
         ],
-        body,
+        Body::from_stream(ReaderStream::new(file)),
     ))
 }
 
@@ -752,12 +785,7 @@ fn list_photos(album_path: &Path) -> Vec<Photo> {
 
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
-        let lower = name.to_lowercase();
-        if lower.ends_with(".jpg")
-            || lower.ends_with(".jpeg")
-            || lower.ends_with(".png")
-            || lower.ends_with(".webp")
-        {
+        if is_photo_filename(&name) {
             let date = exif::read_exif_date(&entry.path());
             photos.push(Photo {
                 filename: name,
@@ -1038,6 +1066,7 @@ mod tests {
             site_title: String::new(),
             footer_snippet: None,
             thumbnail_permits: Arc::new(Semaphore::new(1)),
+            thumbnail_requests: Arc::new(Semaphore::new(MAX_THUMBNAIL_REQUESTS)),
             thumbnail_wakeup: Arc::new(Notify::new()),
             worker_status: Arc::default(),
         };
@@ -1054,6 +1083,45 @@ mod tests {
         assert_eq!(state.thumbnail_permits.available_permits(), 0);
         let _permit = state.thumbnail_permits.acquire().await.unwrap();
         assert!(dir.path().join("cache/album/medium/photo.jpg").is_file());
+    }
+
+    #[tokio::test]
+    async fn thumbnail_wait_times_out() {
+        let semaphore = Arc::new(Semaphore::new(0));
+        let result = acquire_thumbnail_permit(semaphore.clone(), Duration::from_millis(1)).await;
+        assert_eq!(result.err(), Some(StatusCode::SERVICE_UNAVAILABLE));
+        semaphore.add_permits(1);
+        assert_eq!(semaphore.available_permits(), 1);
+    }
+
+    #[tokio::test]
+    async fn thumbnail_request_limit_rejects_new_request() {
+        let dir = tempfile::tempdir().unwrap();
+        let photos_dir = dir.path().join("photos");
+        fs::create_dir_all(photos_dir.join("album")).unwrap();
+        fs::copy(fixture_path(), photos_dir.join("album/photo.jpg")).unwrap();
+        let requests = Arc::new(Semaphore::new(MAX_THUMBNAIL_REQUESTS));
+        let _all_requests = requests
+            .clone()
+            .try_acquire_many_owned(MAX_THUMBNAIL_REQUESTS as u32)
+            .unwrap();
+        let state = AppState {
+            photos_dir,
+            cache_dir: dir.path().join("cache"),
+            site_title: String::new(),
+            footer_snippet: None,
+            thumbnail_permits: Arc::new(Semaphore::new(1)),
+            thumbnail_requests: requests,
+            thumbnail_wakeup: Arc::new(Notify::new()),
+            worker_status: Arc::default(),
+        };
+
+        let result = serve_thumb(
+            State(state),
+            extract::Path(("album".into(), "medium".into(), "photo.jpg".into())),
+        )
+        .await;
+        assert_eq!(result.err(), Some(StatusCode::SERVICE_UNAVAILABLE));
     }
 
     #[test]

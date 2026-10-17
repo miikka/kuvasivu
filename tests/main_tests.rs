@@ -488,7 +488,43 @@ async fn test_serve_photo_unknown_extension() {
     fs::write(album_dir.join("data.bin"), b"binary data").unwrap();
 
     let router = kuvasivu::build_router(dir.path(), &dir.path().join("cache"));
-    let (status, _, content_type) = get_bytes(router, "/photos/test-album/data.bin").await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(content_type, "application/octet-stream");
+    assert_eq!(
+        get_status(router, "/photos/test-album/data.bin").await,
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
+async fn test_serve_photo_does_not_expose_album_metadata() {
+    let env = setup_with_album();
+    assert_eq!(
+        get_status(env.router, "/photos/test-album/album.toml").await,
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
+async fn test_serve_file_streams_large_photo() {
+    let dir = tempfile::tempdir().unwrap();
+    let album_dir = dir.path().join("photos/test-album");
+    fs::create_dir_all(&album_dir).unwrap();
+    let contents = vec![42; 64 * 1024];
+    fs::write(album_dir.join("large.jpg"), &contents).unwrap();
+
+    let router = kuvasivu::build_router(dir.path(), &dir.path().join("cache"));
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/photos/test-album/large.jpg")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut body = response.into_body();
+    let first = body.frame().await.unwrap().unwrap().into_data().unwrap();
+    assert!(first.len() < contents.len());
+    let remaining = body.collect().await.unwrap().to_bytes();
+    assert_eq!([first.as_ref(), remaining.as_ref()].concat(), contents);
 }
