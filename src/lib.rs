@@ -76,8 +76,10 @@ struct Album {
     cover: Option<String>,
 }
 
+#[derive(Clone)]
 struct Photo {
     filename: String,
+    date: Option<String>,
 }
 
 #[derive(Template)]
@@ -206,30 +208,14 @@ async fn photo(
         .position(|p| p.filename == filename)
         .ok_or(AppError::NotFound)?;
 
-    let prev = if index > 0 {
-        Some(Photo {
-            filename: photos[index - 1].filename.clone(),
-        })
-    } else {
-        None
-    };
-
-    let next = if index + 1 < photos.len() {
-        Some(Photo {
-            filename: photos[index + 1].filename.clone(),
-        })
-    } else {
-        None
-    };
+    let prev = index.checked_sub(1).map(|i| photos[i].clone());
+    let next = photos.get(index + 1).cloned();
+    let photo = photos[index].clone();
 
     let album = load_album(&slug, &album_path, &photos);
 
     let photo_path = album_path.join(&filename);
     let exif = read_exif_info(&photo_path);
-
-    let photo = Photo {
-        filename: filename.clone(),
-    };
 
     let site_title = state.site_title.to_string();
     let footer_snippet = state.footer_snippet.clone();
@@ -355,11 +341,8 @@ fn scan_albums(photos_dir: &Path) -> Vec<Album> {
     albums
 }
 
-fn derive_sort_date(album_path: &Path, photos: &[Photo]) -> Option<String> {
-    photos
-        .iter()
-        .filter_map(|p| exif::read_exif_date(&album_path.join(&p.filename)))
-        .max()
+fn derive_sort_date(photos: &[Photo]) -> Option<String> {
+    photos.iter().filter_map(|p| p.date.clone()).max()
 }
 
 fn load_album(slug: &str, album_path: &Path, photos: &[Photo]) -> Album {
@@ -368,10 +351,8 @@ fn load_album(slug: &str, album_path: &Path, photos: &[Photo]) -> Album {
     Album {
         title: meta.title.unwrap_or_else(|| slug_to_title(slug)),
         description: meta.description.unwrap_or_default(),
-        timespan: meta
-            .timespan
-            .unwrap_or_else(|| derive_timespan(album_path, photos)),
-        sort_date: derive_sort_date(album_path, photos),
+        timespan: meta.timespan.unwrap_or_else(|| derive_timespan(photos)),
+        sort_date: derive_sort_date(photos),
         slug: slug.to_string(),
         cover,
     }
@@ -399,11 +380,21 @@ fn list_photos(album_path: &Path) -> Vec<Photo> {
             || lower.ends_with(".png")
             || lower.ends_with(".webp")
         {
-            photos.push(Photo { filename: name });
+            let date = exif::read_exif_date(&entry.path());
+            photos.push(Photo {
+                filename: name,
+                date,
+            });
         }
     }
 
-    photos.sort_by(|a, b| a.filename.cmp(&b.filename));
+    // Chronological by EXIF date; undated photos go last, ordered by filename.
+    photos.sort_by(|a, b| match (&a.date, &b.date) {
+        (Some(ad), Some(bd)) => ad.cmp(bd).then_with(|| a.filename.cmp(&b.filename)),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => a.filename.cmp(&b.filename),
+    });
     photos
 }
 
@@ -419,15 +410,8 @@ fn slug_to_title(slug: &str) -> String {
         .join(" ")
 }
 
-fn derive_timespan(album_path: &Path, photos: &[Photo]) -> String {
-    let mut dates: Vec<String> = Vec::new();
-
-    for photo in photos {
-        if let Some(date) = exif::read_exif_date(&album_path.join(&photo.filename)) {
-            dates.push(date);
-        }
-    }
-
+fn derive_timespan(photos: &[Photo]) -> String {
+    let dates: Vec<String> = photos.iter().filter_map(|p| p.date.clone()).collect();
     format_date_range(&dates)
 }
 
@@ -482,29 +466,23 @@ mod tests {
 
     #[test]
     fn derive_timespan_empty() {
-        let dir = tempfile::tempdir().unwrap();
-        let photos: Vec<Photo> = vec![];
-        assert_eq!(derive_timespan(dir.path(), &photos), "");
+        assert_eq!(derive_timespan(&[]), "");
     }
 
     #[test]
     fn derive_timespan_single_date() {
         let dir = tempfile::tempdir().unwrap();
         fs::copy(fixture_path(), dir.path().join("photo.jpg")).unwrap();
-        let photos = vec![Photo {
-            filename: "photo.jpg".to_string(),
-        }];
-        assert_eq!(derive_timespan(dir.path(), &photos), "February 2026");
+        let photos = list_photos(dir.path());
+        assert_eq!(derive_timespan(&photos), "February 2026");
     }
 
     #[test]
     fn derive_timespan_no_exif() {
         let dir = tempfile::tempdir().unwrap();
         fs::write(dir.path().join("photo.jpg"), b"not a real jpeg").unwrap();
-        let photos = vec![Photo {
-            filename: "photo.jpg".to_string(),
-        }];
-        assert_eq!(derive_timespan(dir.path(), &photos), "");
+        let photos = list_photos(dir.path());
+        assert_eq!(derive_timespan(&photos), "");
     }
 
     #[test]
@@ -578,6 +556,19 @@ mod tests {
         let photos = list_photos(dir.path());
         let names: Vec<&str> = photos.iter().map(|p| p.filename.as_str()).collect();
         assert_eq!(names, vec!["a.png", "b.jpg", "c.webp"]);
+    }
+
+    #[test]
+    fn list_photos_sorts_chronologically() {
+        let dir = tempfile::tempdir().unwrap();
+        let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+        // Filenames deliberately in reverse of capture order.
+        fs::copy(fixtures.join("DSCF0263.jpg"), dir.path().join("a.jpg")).unwrap(); // 2026-03-20
+        fs::copy(fixtures.join("DSCF0199.jpg"), dir.path().join("b.jpg")).unwrap(); // 2026-02-01
+        fs::write(dir.path().join("0-undated.jpg"), b"").unwrap();
+        let photos = list_photos(dir.path());
+        let names: Vec<&str> = photos.iter().map(|p| p.filename.as_str()).collect();
+        assert_eq!(names, vec!["b.jpg", "a.jpg", "0-undated.jpg"]);
     }
 
     #[test]
@@ -692,29 +683,24 @@ mod tests {
 
     #[test]
     fn derive_sort_date_no_photos() {
-        let dir = tempfile::tempdir().unwrap();
-        assert_eq!(derive_sort_date(dir.path(), &[]), None);
+        assert_eq!(derive_sort_date(&[]), None);
     }
 
     #[test]
     fn derive_sort_date_no_exif() {
         let dir = tempfile::tempdir().unwrap();
         fs::write(dir.path().join("photo.jpg"), b"not a real jpeg").unwrap();
-        let photos = vec![Photo {
-            filename: "photo.jpg".to_string(),
-        }];
-        assert_eq!(derive_sort_date(dir.path(), &photos), None);
+        let photos = list_photos(dir.path());
+        assert_eq!(derive_sort_date(&photos), None);
     }
 
     #[test]
     fn derive_sort_date_with_exif() {
         let dir = tempfile::tempdir().unwrap();
         fs::copy(fixture_path(), dir.path().join("photo.jpg")).unwrap();
-        let photos = vec![Photo {
-            filename: "photo.jpg".to_string(),
-        }];
+        let photos = list_photos(dir.path());
         assert_eq!(
-            derive_sort_date(dir.path(), &photos).as_deref(),
+            derive_sort_date(&photos).as_deref(),
             Some("2026-02-01 15:01:06")
         );
     }
