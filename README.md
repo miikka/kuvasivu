@@ -45,7 +45,11 @@ Site-wide settings live in `site.toml`:
 
 ```toml
 title = "My Portfolio"
+base_url = "https://photos.example.com"   # optional, see below
 ```
+
+Pages include Open Graph tags, so links shared on social media get a preview.
+Sites need absolute URLs for the link and its preview image, so set `base_url` to the site's public URL to get previews with an image.
 
 ### Environment Variables
 

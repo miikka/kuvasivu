@@ -2,8 +2,6 @@
 source: tests/main_tests.rs
 expression: body
 ---
-
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -12,6 +10,9 @@ expression: body
     <title>Albums – Kuvasivu</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="/static/style.css">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Kuvasivu">
+    <meta property="og:title" content="Kuvasivu">
 </head>
 <body>
     <header>

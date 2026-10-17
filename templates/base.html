@@ -12,6 +12,7 @@ SPDX-License-Identifier: MIT
     <title>{% block title %}{{ site_title }}{% endblock %}</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="/static/style.css">
+    {%- block head %}{% endblock %}
 </head>
 <body{% block body_attr %}{% endblock %}>
     <header>

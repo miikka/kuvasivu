@@ -8,6 +8,11 @@ SPDX-License-Identifier: MIT
 
 {% block title %}Albums – {{ site_title }}{% endblock %}
 
+{% import "social.html" as social %}
+{% block head %}
+    {%- call social::preview(base_url, site_title, "", "/", preview_image()) %}{% endcall %}
+{%- endblock %}
+
 {% block content %}
 <h1>Albums</h1>
 {% if albums.is_empty() %}

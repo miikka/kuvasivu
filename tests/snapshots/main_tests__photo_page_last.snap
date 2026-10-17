@@ -2,8 +2,6 @@
 source: tests/main_tests.rs
 expression: body
 ---
-
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -12,6 +10,11 @@ expression: body
     <title>photo-c.jpg – Test Album – Kuvasivu</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="/static/style.css">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Kuvasivu">
+    <meta property="og:title" content="Test Album">
+    <meta property="og:description" content="A test album.">
+    <meta name="description" content="A test album.">
 </head>
 <body class="photo-page">
     <header>

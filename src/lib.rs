@@ -88,6 +88,9 @@ const RESCAN_INTERVAL: Duration = Duration::from_secs(60);
 struct SiteConfig {
     title: Option<String>,
     footer_snippet: Option<String>,
+    /// Public URL of the site, e.g. `https://photos.example.com`. Social media
+    /// previews need absolute URLs, so they're only complete when this is set.
+    base_url: Option<String>,
 }
 
 #[derive(Clone)]
@@ -96,6 +99,7 @@ struct AppState {
     cache_dir: PathBuf,
     site_title: String,
     footer_snippet: Option<String>,
+    base_url: Option<String>,
     thumbnail_permits: Arc<Semaphore>,
     thumbnail_requests: Arc<Semaphore>,
     /// Wakes up the background thumbnail worker.
@@ -168,6 +172,19 @@ struct Album {
     cover_avif: bool,
 }
 
+impl Album {
+    fn preview_image(&self) -> Option<String> {
+        let cover = self.cover.as_ref()?;
+        Some(preview_image(&self.slug, cover))
+    }
+}
+
+/// The path of a photo's image for social media previews. It's a JPEG, which
+/// every site supports, and the background worker renders it early.
+fn preview_image(album: &str, filename: &str) -> String {
+    format!("/thumbs/{album}/medium/{filename}")
+}
+
 #[derive(Clone)]
 struct Photo {
     filename: String,
@@ -183,7 +200,15 @@ struct Photo {
 struct IndexTemplate {
     site_title: String,
     footer_snippet: Option<String>,
+    base_url: Option<String>,
     albums: Vec<Album>,
+}
+
+impl IndexTemplate {
+    /// The newest album's cover represents the whole site.
+    fn preview_image(&self) -> Option<String> {
+        self.albums.iter().find_map(Album::preview_image)
+    }
 }
 
 #[derive(Template)]
@@ -191,8 +216,15 @@ struct IndexTemplate {
 struct AlbumTemplate {
     site_title: String,
     footer_snippet: Option<String>,
+    base_url: Option<String>,
     album: Album,
     photos: Vec<Photo>,
+}
+
+impl AlbumTemplate {
+    fn page_path(&self) -> String {
+        format!("/album/{}", self.album.slug)
+    }
 }
 
 #[derive(Template)]
@@ -228,11 +260,22 @@ struct Progress {
 struct PhotoTemplate {
     site_title: String,
     footer_snippet: Option<String>,
+    base_url: Option<String>,
     album: Album,
     photo: Photo,
     prev: Option<Photo>,
     next: Option<Photo>,
     exif: ExifInfo,
+}
+
+impl PhotoTemplate {
+    fn page_path(&self) -> String {
+        format!("/album/{}/{}", self.album.slug, self.photo.filename)
+    }
+
+    fn preview_image(&self) -> String {
+        preview_image(&self.album.slug, &self.photo.filename)
+    }
 }
 
 fn load_site_config(data_dir: &Path) -> SiteConfig {
@@ -242,6 +285,7 @@ fn load_site_config(data_dir: &Path) -> SiteConfig {
         .unwrap_or(SiteConfig {
             title: None,
             footer_snippet: None,
+            base_url: None,
         })
 }
 
@@ -275,6 +319,9 @@ pub fn build_app(data_dir: &Path, cache_dir: &Path) -> (Router, ThumbnailWorker)
         cache_dir: cache_dir.to_path_buf(),
         site_title: config.title.unwrap_or_else(|| "Kuvasivu".to_string()),
         footer_snippet: config.footer_snippet,
+        base_url: config
+            .base_url
+            .map(|url| url.trim_end_matches('/').to_string()),
         thumbnail_permits: Arc::new(Semaphore::new(MAX_CONCURRENT_THUMBNAILS)),
         thumbnail_requests: Arc::new(Semaphore::new(MAX_THUMBNAIL_REQUESTS)),
         thumbnail_wakeup: Arc::new(Notify::new()),
@@ -326,6 +373,7 @@ async fn index(State(state): State<AppState>) -> Result<impl IntoResponse, AppEr
         (IndexTemplate {
             site_title,
             footer_snippet,
+            base_url: state.base_url.clone(),
             albums,
         })
         .render()?,
@@ -358,6 +406,7 @@ async fn album(
         (AlbumTemplate {
             site_title,
             footer_snippet,
+            base_url: state.base_url.clone(),
             album,
             photos,
         })
@@ -400,6 +449,7 @@ async fn photo(
         (PhotoTemplate {
             site_title,
             footer_snippet,
+            base_url: state.base_url.clone(),
             album,
             photo,
             prev,
@@ -1065,6 +1115,7 @@ mod tests {
             cache_dir: dir.path().join("cache"),
             site_title: String::new(),
             footer_snippet: None,
+            base_url: None,
             thumbnail_permits: Arc::new(Semaphore::new(1)),
             thumbnail_requests: Arc::new(Semaphore::new(MAX_THUMBNAIL_REQUESTS)),
             thumbnail_wakeup: Arc::new(Notify::new()),
@@ -1110,6 +1161,7 @@ mod tests {
             cache_dir: dir.path().join("cache"),
             site_title: String::new(),
             footer_snippet: None,
+            base_url: None,
             thumbnail_permits: Arc::new(Semaphore::new(1)),
             thumbnail_requests: requests,
             thumbnail_wakeup: Arc::new(Notify::new()),

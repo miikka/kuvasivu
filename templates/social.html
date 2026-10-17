@@ -1,0 +1,25 @@
+{#
+SPDX-FileCopyrightText: 2026 Miikka Koskinen
+
+SPDX-License-Identifier: MIT
+#}
+
+{#- Previews for social media sites. They need absolute URLs, so the URL and
+    image are only included when `base_url` is configured. `path` is the
+    page's path and `image` the path of its preview image. #}
+{%- macro preview(base_url, title, description, path, image) %}
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="{{ site_title }}">
+    <meta property="og:title" content="{{ title }}">
+    {%- if !description.is_empty() %}
+    <meta property="og:description" content="{{ description }}">
+    <meta name="description" content="{{ description }}">
+    {%- endif %}
+    {%- if let Some(base_url) = base_url %}
+    <meta property="og:url" content="{{ base_url }}{{ path }}">
+    {%- if let Some(image) = image %}
+    <meta property="og:image" content="{{ base_url }}{{ image }}">
+    <meta name="twitter:card" content="summary_large_image">
+    {%- endif %}
+    {%- endif %}
+{%- endmacro %}

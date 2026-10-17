@@ -20,7 +20,12 @@ struct TestEnv {
 }
 
 fn setup_with_album() -> TestEnv {
+    setup_with_album_and_config("")
+}
+
+fn setup_with_album_and_config(site_toml: &str) -> TestEnv {
     let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("site.toml"), site_toml).unwrap();
     let photos_dir = dir.path().join("photos");
     let album_dir = photos_dir.join("test-album");
     fs::create_dir_all(&album_dir).unwrap();
@@ -126,6 +131,43 @@ async fn test_album_page() {
     let (status, body) = get(env.router, "/album/test-album").await;
     assert_eq!(status, StatusCode::OK);
     insta::assert_snapshot!("album_page", body);
+}
+
+#[tokio::test]
+async fn test_album_page_social_preview() {
+    let env = setup_with_album_and_config("base_url = \"https://photos.example.com/\"\n");
+    let (status, body) = get(env.router, "/album/test-album").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains(
+        r#"<meta property="og:url" content="https://photos.example.com/album/test-album">"#
+    ));
+    assert!(body.contains(
+        r#"<meta property="og:image" content="https://photos.example.com/thumbs/test-album/medium/photo-a.jpg">"#
+    ));
+    assert!(body.contains(r#"<meta property="og:title" content="Test Album">"#));
+    assert!(body.contains(r#"<meta property="og:description" content="A test album.">"#));
+}
+
+#[tokio::test]
+async fn test_index_page_social_preview() {
+    let env = setup_with_album_and_config("base_url = \"https://photos.example.com\"\n");
+    let (_, body) = get(env.router, "/").await;
+    assert!(body.contains(r#"<meta property="og:url" content="https://photos.example.com/">"#));
+    assert!(body.contains(
+        r#"<meta property="og:image" content="https://photos.example.com/thumbs/test-album/medium/photo-a.jpg">"#
+    ));
+}
+
+#[tokio::test]
+async fn test_photo_page_social_preview() {
+    let env = setup_with_album_and_config("base_url = \"https://photos.example.com\"\n");
+    let (_, body) = get(env.router, "/album/test-album/photo-b.jpg").await;
+    assert!(body.contains(
+        r#"<meta property="og:url" content="https://photos.example.com/album/test-album/photo-b.jpg">"#
+    ));
+    assert!(body.contains(
+        r#"<meta property="og:image" content="https://photos.example.com/thumbs/test-album/medium/photo-b.jpg">"#
+    ));
 }
 
 #[tokio::test]
@@ -334,7 +376,7 @@ fn test_startup_removes_stale_temp_files() {
     fs::write(thumb_dir.join(".tmp-7-photo-a.jpg.avif"), b"").unwrap();
     fs::write(thumb_dir.join("photo-b.jpg.avif"), b"done").unwrap();
 
-    kuvasivu::build_router(dir.path(), &dir.path().join("cache"));
+    let _ = kuvasivu::build_router(dir.path(), &dir.path().join("cache"));
 
     let names: Vec<_> = fs::read_dir(thumb_dir)
         .unwrap()
@@ -418,7 +460,7 @@ async fn test_serve_photo_png() {
     let dir = tempfile::tempdir().unwrap();
     let album_dir = dir.path().join("photos").join("test-album");
     fs::create_dir_all(&album_dir).unwrap();
-    fs::write(album_dir.join("photo.png"), &make_minimal_png()).unwrap();
+    fs::write(album_dir.join("photo.png"), make_minimal_png()).unwrap();
 
     let router = kuvasivu::build_router(dir.path(), &dir.path().join("cache"));
     let (status, _, content_type) = get_bytes(router, "/photos/test-album/photo.png").await;
