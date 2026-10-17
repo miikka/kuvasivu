@@ -6,6 +6,8 @@
 ARG BINARY_NAME=kuvasivu
 
 FROM rust:1-trixie AS chef
+# rav1e (the AVIF encoder) needs nasm for its x86_64 SIMD assembly.
+RUN apt-get update && apt-get install -y --no-install-recommends nasm && rm -rf /var/lib/apt/lists/*
 RUN cargo install --locked cargo-chef
 WORKDIR /build
 
