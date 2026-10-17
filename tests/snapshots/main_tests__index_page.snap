@@ -26,8 +26,8 @@ expression: body
     <a href="/album/test-album" class="album-card">
         
         <picture>
-            <source srcset="/thumbs/test-album/small/photo-a.jpg.avif" type="image/avif">
-            <img src="/thumbs/test-album/small/photo-a.jpg" alt="Test Album" loading="lazy">
+            <source srcset="/thumbs/test-album/small/photo-a.jpg.avif 1x, /thumbs/test-album/medium/photo-a.jpg.avif 2x" type="image/avif">
+            <img src="/thumbs/test-album/small/photo-a.jpg" srcset="/thumbs/test-album/small/photo-a.jpg 1x, /thumbs/test-album/medium/photo-a.jpg 2x" alt="Test Album" loading="lazy">
         </picture>
         
         <div class="album-info">

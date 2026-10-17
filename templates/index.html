@@ -18,8 +18,9 @@ SPDX-License-Identifier: MIT
     <a href="/album/{{ album.slug }}" class="album-card">
         {% if let Some(cover) = album.cover %}
         <picture>
-            <source srcset="/thumbs/{{ album.slug }}/small/{{ cover }}.avif" type="image/avif">
-            <img src="/thumbs/{{ album.slug }}/small/{{ cover }}" alt="{{ album.title }}" loading="lazy">
+            {#- Cards are 280px+ wide, so high-DPI screens need medium to stay sharp. #}
+            <source srcset="/thumbs/{{ album.slug }}/small/{{ cover }}.avif 1x, /thumbs/{{ album.slug }}/medium/{{ cover }}.avif 2x" type="image/avif">
+            <img src="/thumbs/{{ album.slug }}/small/{{ cover }}" srcset="/thumbs/{{ album.slug }}/small/{{ cover }} 1x, /thumbs/{{ album.slug }}/medium/{{ cover }} 2x" alt="{{ album.title }}" loading="lazy">
         </picture>
         {% else %}
         <div class="album-placeholder"></div>
