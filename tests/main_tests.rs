@@ -323,8 +323,10 @@ async fn test_background_worker_renders_jpegs_then_avifs() {
                 for name in [
                     "small/photo-a.jpg",
                     "medium/photo-a.jpg",
+                    "screen/photo-a.jpg",
                     "small/photo-b.jpg",
                     "medium/photo-b.jpg",
+                    "screen/photo-b.jpg",
                 ] {
                     assert!(cache_dir.join("test-album").join(name).is_file(), "{name}");
                 }
@@ -351,7 +353,11 @@ async fn test_background_worker_renders_jpegs_then_avifs() {
     let (_, body) = get(router.clone(), "/album/test-album").await;
     assert!(body.contains(r#"<source srcset="/thumbs/test-album/medium/photo-a.jpg.avif""#));
     let (_, body) = get(router.clone(), "/album/test-album/photo-b.jpg").await;
-    assert!(body.contains(r#"<source srcset="/thumbs/test-album/large/photo-b.jpg.avif""#));
+    // The fixture is smaller than the medium size, so that's all the photo page offers.
+    assert!(
+        body.contains(r#"<source srcset="/thumbs/test-album/medium/photo-b.jpg.avif 640w" sizes="100vw" type="image/avif">"#),
+        "{body}"
+    );
     let (status, body, content_type) =
         get_bytes(router, "/thumbs/test-album/medium/photo-a.jpg.avif").await;
     assert_eq!(status, StatusCode::OK);

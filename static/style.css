@@ -245,6 +245,12 @@ picture {
     object-fit: contain;
 }
 
+/* While the next photo loads. The delay keeps preloaded photos from flickering. */
+.photo-loading .photo-main img {
+    opacity: 0.6;
+    transition: opacity 0.2s 0.1s;
+}
+
 @media (prefers-color-scheme: dark) {
     body {
         color: #e0e0e0;

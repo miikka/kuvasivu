@@ -34,9 +34,9 @@ expression: body
             <thead>
                 <tr>
                     <th>Album</th>
-                    <th>JPEG <span class="status-sizes">small, medium</span></th>
+                    <th>JPEG <span class="status-sizes">small, medium, screen</span></th>
                     <th>AVIF <span class="status-sizes">small, medium</span></th>
-                    <th>AVIF <span class="status-sizes">large</span></th>
+                    <th>AVIF <span class="status-sizes">screen, large</span></th>
                 </tr>
             </thead>
             <tbody>

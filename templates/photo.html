@@ -29,12 +29,14 @@ SPDX-License-Identifier: MIT
     <div class="photo-stage">
         <a {% if let Some(prev) = prev %}href="/album/{{ album.slug }}/{{ prev.filename }}"{% endif %} class="photo-nav photo-nav-prev{% if prev.is_none() %} photo-nav-disabled{% endif %}" aria-label="Previous photo">&lsaquo;</a>
 
-        <div class="photo-main">
+        <div class="photo-main" data-thumb="/thumbs/{{ album.slug }}/medium/{{ photo.filename }}"
+            {%- if photo.avif %} data-thumb-avif="/thumbs/{{ album.slug }}/medium/{{ photo.filename }}.avif"{% endif %}>
             <picture>
-                {%- if photo.avif %}
-                <source srcset="/thumbs/{{ album.slug }}/large/{{ photo.filename }}.avif" type="image/avif">
+                {%- if let Some(srcset) = avif_srcset %}
+                <source srcset="{{ srcset }}" sizes="100vw" type="image/avif">
                 {%- endif %}
-                <img src="/photos/{{ album.slug }}/{{ photo.filename }}" alt="{{ photo.filename }}">
+                <img src="/photos/{{ album.slug }}/{{ photo.filename }}"
+                    {%- if let Some(srcset) = jpeg_srcset %} srcset="{{ srcset }}" sizes="100vw"{% endif %} alt="{{ photo.filename }}">
             </picture>
         </div>
 
@@ -44,36 +46,134 @@ SPDX-License-Identifier: MIT
 
 <script>
 (function() {
-    var cache = {};
-    var navigating = false;
+    // Photo pages by URL, as promises of what's needed to show them, and the
+    // ones that have loaded. Only the current photo and its neighbours are
+    // kept, so phones don't run out of memory holding decoded photos.
+    var pages = {};
+    var loaded = {};
+    var currentUrl = location.href;
+    // The page being navigated to, until its photo is shown.
+    var pendingUrl = null;
+    var stage = document.querySelector('.photo-stage');
     var prevLink = document.querySelector('.photo-nav-prev');
     var nextLink = document.querySelector('.photo-nav-next');
-    var mainImg = document.querySelector('.photo-main img');
-    var mainSource = document.querySelector('.photo-main source');
     var exifSpan = document.querySelector('.photo-exif');
     var topbar = document.querySelector('.photo-topbar');
 
-    function fetchPage(url) {
-        if (cache[url]) return cache[url];
-        cache[url] = fetch(url).then(function(r) { return r.text(); }).then(function(html) {
-            var doc = new DOMParser().parseFromString(html, 'text/html');
-            // preload the image into browser cache
-            loadImage(doc);
-            return doc;
+    function absolute(href) {
+        return href ? new URL(href, location.href).href : null;
+    }
+
+    // Reads what's needed to show a photo page from its HTML.
+    function readPage(doc) {
+        var main = doc.querySelector('.photo-main');
+        var img = main && main.querySelector('img');
+        if (!img) return null;
+        var source = main.querySelector('source');
+        var exif = doc.querySelector('.photo-exif');
+        var alt = img.getAttribute('alt') || '';
+        return {
+            title: doc.title,
+            prev: absolute(doc.querySelector('.photo-nav-prev').getAttribute('href')),
+            next: absolute(doc.querySelector('.photo-nav-next').getAttribute('href')),
+            exif: exif && exif.textContent,
+            image: {
+                src: img.getAttribute('src'),
+                srcset: img.getAttribute('srcset'),
+                avifSrcset: source && source.getAttribute('srcset'),
+                alt: alt
+            },
+            thumb: { src: main.dataset.thumb, avifSrcset: main.dataset.thumbAvif, alt: alt }
+        };
+    }
+
+    // Builds a <picture> like the server renders. The <img> gets its sources
+    // last, so the browser picks one only once the AVIF <source> is in place.
+    function buildPicture(image) {
+        var picture = document.createElement('picture');
+        if (image.avifSrcset) {
+            var source = document.createElement('source');
+            source.type = 'image/avif';
+            source.sizes = '100vw';
+            source.srcset = image.avifSrcset;
+            picture.appendChild(source);
+        }
+        var img = document.createElement('img');
+        img.alt = image.alt;
+        picture.appendChild(img);
+        if (image.srcset) {
+            img.sizes = '100vw';
+            img.srcset = image.srcset;
+        }
+        img.src = image.src;
+        return picture;
+    }
+
+    // Loads and decodes a picture's photo, so showing it doesn't stall. If
+    // it fails to load, it resolves anyway: the browser shows what it can.
+    function decodePicture(picture) {
+        var img = picture.querySelector('img');
+        var decoded = img.decode ? img.decode() : new Promise(function(resolve) {
+            img.onload = img.onerror = resolve;
         });
-        return cache[url];
+        return decoded.catch(function() {});
     }
 
-    // Starts loading the photo of a fetched page. Cloning the whole <picture>
-    // lets the browser choose between the AVIF source and the fallback.
-    function loadImage(doc) {
-        var picture = doc.querySelector('.photo-main picture');
-        if (!picture) return null;
-        return document.importNode(picture, true).querySelector('img');
+    function loadPage(url) {
+        if (pages[url]) return pages[url];
+        var promise = fetch(url).then(function(r) {
+            if (!r.ok) throw new Error(r.status);
+            return r.text();
+        }).then(function(html) {
+            var page = readPage(new DOMParser().parseFromString(html, 'text/html'));
+            if (!page) throw new Error('not a photo page');
+            page.picture = buildPicture(page.image);
+            page.ready = decodePicture(page.picture).then(function() { page.decoded = true; });
+            if (pages[url] === promise) loaded[url] = page;
+            return page;
+        });
+        promise.catch(function() {
+            if (pages[url] === promise) delete pages[url];
+        });
+        pages[url] = promise;
+        return promise;
     }
 
-    function updateNav(linkEl, newEl) {
-        var href = newEl.getAttribute('href');
+    // Preloads two photos each way, so quick taps don't outrun loading.
+    function preloadAround(url) {
+        ['next', 'prev'].forEach(function(dir) {
+            var first = loaded[url][dir];
+            if (!first) return;
+            loadPage(first).then(function(page) {
+                if (page[dir] && currentUrl === url) loadPage(page[dir]);
+            });
+        });
+    }
+
+    // Forgets pages more than two photos away from the current one.
+    function prune() {
+        var keep = {};
+        ['prev', 'next'].forEach(function(dir) {
+            var url = currentUrl;
+            for (var i = 0; i <= 2 && url; i++) {
+                keep[url] = true;
+                url = loaded[url] && loaded[url][dir];
+            }
+        });
+        Object.keys(pages).forEach(function(url) {
+            if (!keep[url]) {
+                delete pages[url];
+                delete loaded[url];
+            }
+        });
+    }
+
+    function showPicture(picture) {
+        var shown = stage.querySelector('.photo-main picture');
+        if (shown !== picture) shown.replaceWith(picture);
+    }
+
+    function updateNav(linkEl, href) {
         if (href) {
             linkEl.setAttribute('href', href);
             linkEl.classList.remove('photo-nav-disabled');
@@ -83,92 +183,90 @@ SPDX-License-Identifier: MIT
         }
     }
 
-    function navigateTo(url) {
-        if (!url || navigating) return;
-        navigating = true;
-        fetchPage(url).then(function(doc) {
-            var newImg = doc.querySelector('.photo-main img');
-            var newSource = doc.querySelector('.photo-main source');
-            var loader = loadImage(doc);
-            if (!newImg || !loader) { window.location = url; return; }
+    function updateExif(text) {
+        if (text && exifSpan) {
+            exifSpan.textContent = text;
+        } else if (text && !exifSpan) {
+            exifSpan = document.createElement('span');
+            exifSpan.className = 'photo-exif';
+            exifSpan.textContent = text;
+            topbar.appendChild(exifSpan);
+        } else if (!text && exifSpan) {
+            exifSpan.remove();
+            exifSpan = null;
+        }
+    }
 
-            // preload image, then swap src once decoded
-            loader.onload = loader.onerror = function() {
-                loader.onload = loader.onerror = null; // run once
-                // update image in place — old image stays visible until new src paints
-                // the AVIF source is only there once it has been rendered
-                if (newSource) {
-                    if (!mainSource) {
-                        mainSource = document.createElement('source');
-                        mainSource.type = 'image/avif';
-                        mainImg.parentNode.insertBefore(mainSource, mainImg);
-                    }
-                    mainSource.srcset = newSource.getAttribute('srcset');
-                } else if (mainSource) {
-                    mainSource.remove();
-                    mainSource = null;
-                }
-                mainImg.src = newImg.getAttribute('src');
-                mainImg.alt = newImg.getAttribute('alt') || '';
+    function finish(page) {
+        showPicture(page.picture);
+        stage.classList.remove('photo-loading');
+        pendingUrl = null;
+    }
 
-                // update nav links
-                updateNav(prevLink, doc.querySelector('.photo-nav-prev'));
-                updateNav(nextLink, doc.querySelector('.photo-nav-next'));
+    function navigateTo(url, push) {
+        if (!url || url === (pendingUrl || currentUrl)) return;
+        pendingUrl = url;
+        stage.classList.add('photo-loading');
+        loadPage(url).then(function(page) {
+            if (pendingUrl !== url) return;
+            // Update the page right away, so the next tap can follow.
+            currentUrl = url;
+            updateNav(prevLink, page.prev);
+            updateNav(nextLink, page.next);
+            updateExif(page.exif);
+            if (push) history.pushState(null, '', url);
+            document.title = page.title;
+            prune();
+            preloadAround(url);
 
-                // update exif
-                var newExif = doc.querySelector('.photo-exif');
-                if (newExif && exifSpan) {
-                    exifSpan.textContent = newExif.textContent;
-                } else if (newExif && !exifSpan) {
-                    exifSpan = document.createElement('span');
-                    exifSpan.className = 'photo-exif';
-                    exifSpan.textContent = newExif.textContent;
-                    topbar.appendChild(exifSpan);
-                } else if (!newExif && exifSpan) {
-                    exifSpan.remove();
-                    exifSpan = null;
-                }
-
-                history.pushState(null, '', url);
-                document.title = doc.title;
-                preloadAdjacent();
-                navigating = false;
-            };
-            if (loader.complete) loader.onload();
+            if (page.decoded) {
+                finish(page);
+                return;
+            }
+            // Until the photo is ready, show its medium thumbnail, which the
+            // album page has usually loaded already.
+            var thumb = buildPicture(page.thumb);
+            decodePicture(thumb).then(function() {
+                if (pendingUrl === url && !page.decoded) showPicture(thumb);
+            });
+            page.ready.then(function() {
+                if (pendingUrl === url) finish(page);
+            });
+        }, function() {
+            window.location = url;
         });
     }
 
-    function preloadAdjacent() {
-        [prevLink, nextLink].forEach(function(link) {
-            var href = link.getAttribute('href');
-            if (href) fetchPage(href);
-        });
-    }
+    var initial = readPage(document);
+    initial.picture = document.querySelector('.photo-main picture');
+    initial.decoded = true;
+    initial.ready = Promise.resolve();
+    pages[currentUrl] = Promise.resolve(initial);
+    loaded[currentUrl] = initial;
 
     prevLink.addEventListener('click', function(e) {
-        if (this.hasAttribute('href')) { e.preventDefault(); navigateTo(this.href); }
+        if (this.hasAttribute('href')) { e.preventDefault(); navigateTo(this.href, true); }
     });
     nextLink.addEventListener('click', function(e) {
-        if (this.hasAttribute('href')) { e.preventDefault(); navigateTo(this.href); }
+        if (this.hasAttribute('href')) { e.preventDefault(); navigateTo(this.href, true); }
     });
 
     window.addEventListener('popstate', function() {
-        navigating = false;
-        navigateTo(location.href);
+        navigateTo(location.href, false);
     });
 
     document.addEventListener('keydown', function(e) {
         if (e.key === 'ArrowLeft' && prevLink.hasAttribute('href')) {
-            navigateTo(prevLink.href);
+            navigateTo(prevLink.href, true);
         } else if (e.key === 'ArrowRight' && nextLink.hasAttribute('href')) {
-            navigateTo(nextLink.href);
+            navigateTo(nextLink.href, true);
         } else if (e.key === 'Escape') {
             e.preventDefault();
             window.location.href = document.querySelector('.photo-back').href;
         }
     });
 
-    preloadAdjacent();
+    preloadAround(currentUrl);
 })();
 </script>
 {% endblock %}
