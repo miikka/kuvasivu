@@ -1,0 +1,79 @@
+{#
+SPDX-FileCopyrightText: 2026 Miikka Koskinen
+
+SPDX-License-Identifier: MIT
+#}
+
+{% extends "base.html" %}
+
+{% block title %}Status – {{ site_title }}{% endblock %}
+
+{% block body_attr %} class="status-page"{% endblock %}
+
+{% block content %}
+<h1>Status</h1>
+
+<section class="status-panel">
+    <h2>Thumbnail worker</h2>
+    {%- if !running %}
+    <p class="worker-state worker-stopped">Not running</p>
+    <p class="status-detail">Thumbnails are only generated on request, as JPEG.</p>
+    {%- else if let Some((photo, thumbnails)) = current %}
+    <p class="worker-state worker-busy">Rendering</p>
+    <p class="status-detail"><code>{{ photo }}</code> · {{ thumbnails }}</p>
+    {%- else %}
+    <p class="worker-state worker-idle">Idle</p>
+    <p class="status-detail">
+        {%- if let Some(t) = last_pass_finished %}Nothing left to render. Last checked for new photos {{ t }}.{% endif -%}
+    </p>
+    {%- endif %}
+</section>
+
+<section class="status-panel">
+    <h2>Thumbnails</h2>
+    {%- if albums.is_empty() %}
+    <p class="status-detail">No albums.</p>
+    {%- else %}
+    <div class="status-table-scroll">
+        <table class="status-table">
+            <thead>
+                <tr>
+                    <th>Album</th>
+                    {%- for (format, sizes) in passes %}
+                    <th>{{ format }} <span class="status-sizes">{{ sizes }}</span></th>
+                    {%- endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {%- for album in albums %}
+                <tr>
+                    <td>
+                        <a href="/album/{{ album.slug }}">{{ album.title }}</a>
+                        {%- if album.failed > 0 %} <span class="status-failed-badge">{{ album.failed }} failed</span>{% endif %}
+                    </td>
+                    {%- for p in album.progress %}
+                    <td{% if p.done == p.total %} class="status-complete"{% endif %}>
+                        <span class="status-count">{{ p.done }}/{{ p.total }}</span>
+                        <span class="status-bar"><span style="width: {{ p.percent }}%"></span></span>
+                    </td>
+                    {%- endfor %}
+                </tr>
+                {%- endfor %}
+            </tbody>
+        </table>
+    </div>
+    {%- endif %}
+</section>
+
+{% if !failed.is_empty() %}
+<section class="status-panel status-panel-failed">
+    <h2>Failed photos</h2>
+    <p class="status-detail">These couldn't be decoded. They're retried once the file changes.</p>
+    <ul class="status-failed-list">
+        {%- for (album, filename) in failed %}
+        <li><code>{{ album }}/{{ filename }}</code></li>
+        {%- endfor %}
+    </ul>
+</section>
+{% endif %}
+{% endblock %}

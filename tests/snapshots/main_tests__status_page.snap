@@ -1,0 +1,75 @@
+---
+source: tests/main_tests.rs
+expression: body
+---
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Status – Kuvasivu</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="status-page">
+    <header>
+        <nav><a href="/">Kuvasivu</a></nav>
+    </header>
+    <main>
+        
+<h1>Status</h1>
+
+<section class="status-panel">
+    <h2>Thumbnail worker</h2>
+    <p class="worker-state worker-stopped">Not running</p>
+    <p class="status-detail">Thumbnails are only generated on request, as JPEG.</p>
+</section>
+
+<section class="status-panel">
+    <h2>Thumbnails</h2>
+    <div class="status-table-scroll">
+        <table class="status-table">
+            <thead>
+                <tr>
+                    <th>Album</th>
+                    <th>JPEG <span class="status-sizes">small, medium</span></th>
+                    <th>AVIF <span class="status-sizes">small, medium</span></th>
+                    <th>AVIF <span class="status-sizes">large</span></th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>
+                        <a href="/album/test-album">Test Album</a>
+                    </td>
+                    <td>
+                        <span class="status-count">0/3</span>
+                        <span class="status-bar"><span style="width: 0%"></span></span>
+                    </td>
+                    <td>
+                        <span class="status-count">0/3</span>
+                        <span class="status-bar"><span style="width: 0%"></span></span>
+                    </td>
+                    <td>
+                        <span class="status-count">0/3</span>
+                        <span class="status-bar"><span style="width: 0%"></span></span>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+
+
+    </main>
+    
+    <footer class="powered-by">
+        <a href="https://github.com/miikka/kuvasivu/"><img src="/static/powered-by.svg" width="88" height="31" alt="Powered by kuvasivu"></a>
+    </footer>
+    
+    
+</body>
+</html>

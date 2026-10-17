@@ -7,9 +7,9 @@ mod exif;
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, SystemTime};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant, SystemTime};
 
 use askama::Template;
 use axum::Router;
@@ -95,6 +95,20 @@ struct AppState {
     thumbnail_permits: Arc<Semaphore>,
     /// Wakes up the background thumbnail worker.
     thumbnail_wakeup: Arc<Notify>,
+    worker_status: Arc<Mutex<WorkerStatus>>,
+}
+
+/// What the background thumbnail worker is doing, for the status page.
+#[derive(Default)]
+struct WorkerStatus {
+    running: bool,
+    /// The photo being rendered (`album/filename`), and which thumbnails of
+    /// it, e.g. "AVIF small, medium".
+    current: Option<(String, String)>,
+    last_pass_finished: Option<Instant>,
+    /// Photos that failed to render, with their modification time, so a
+    /// broken file isn't decoded again on every pass until it's replaced.
+    failed: HashSet<(PathBuf, Option<SystemTime>)>,
 }
 
 impl AppState {
@@ -112,6 +126,22 @@ impl AppState {
             self.thumbnail_wakeup.notify_one();
         }
         ready
+    }
+
+    /// The thumbnails of a pass (see `BACKGROUND_PASSES`) that a photo still
+    /// lacks, as (path, max dimension).
+    fn missing_thumbnails(
+        &self,
+        album: &str,
+        filename: &str,
+        (sizes, suffix): (&[&str], &str),
+    ) -> Vec<(PathBuf, u32)> {
+        let name = format!("{filename}{suffix}");
+        sizes
+            .iter()
+            .filter_map(|size| Some((self.thumb_path(album, size, &name), thumb_max_dim(size)?)))
+            .filter(|(path, _)| !path.is_file())
+            .collect()
     }
 }
 
@@ -161,6 +191,34 @@ struct AlbumTemplate {
 }
 
 #[derive(Template)]
+#[template(path = "status.html")]
+struct StatusTemplate {
+    site_title: String,
+    footer_snippet: Option<String>,
+    running: bool,
+    current: Option<(String, String)>,
+    last_pass_finished: Option<String>,
+    passes: Vec<(&'static str, String)>,
+    albums: Vec<AlbumStatus>,
+    /// Photos that failed to render, as (album, filename).
+    failed: Vec<(String, String)>,
+}
+
+struct AlbumStatus {
+    slug: String,
+    title: String,
+    /// For each pass, how many photos have all its thumbnails.
+    progress: Vec<Progress>,
+    failed: usize,
+}
+
+struct Progress {
+    done: usize,
+    total: usize,
+    percent: usize,
+}
+
+#[derive(Template)]
 #[template(path = "photo.html")]
 struct PhotoTemplate {
     site_title: String,
@@ -207,6 +265,7 @@ pub fn build_app(data_dir: &Path, cache_dir: &Path) -> (Router, ThumbnailWorker)
         footer_snippet: config.footer_snippet,
         thumbnail_permits: Arc::new(Semaphore::new(MAX_CONCURRENT_THUMBNAILS)),
         thumbnail_wakeup: Arc::new(Notify::new()),
+        worker_status: Arc::default(),
     };
     let worker = ThumbnailWorker {
         state: state.clone(),
@@ -218,6 +277,7 @@ pub fn build_app(data_dir: &Path, cache_dir: &Path) -> (Router, ThumbnailWorker)
         .route("/album/{slug}/{filename}", get(photo))
         .route("/photos/{album}/{filename}", get(serve_photo))
         .route("/thumbs/{album}/{size}/{filename}", get(serve_thumb))
+        .route("/status", get(status))
         .nest_service("/static", ServeDir::new("static"))
         .with_state(state);
     (router, worker)
@@ -337,6 +397,86 @@ async fn photo(
     ))
 }
 
+async fn status(State(state): State<AppState>) -> Result<impl IntoResponse, AppError> {
+    let worker = state.worker_status.lock().unwrap();
+    let mut failed: Vec<(String, String)> = worker
+        .failed
+        .iter()
+        .filter_map(|(path, _)| {
+            let path = path.strip_prefix(&state.photos_dir).ok()?;
+            let album = path.parent()?.to_string_lossy().to_string();
+            Some((album, path.file_name()?.to_string_lossy().to_string()))
+        })
+        .collect();
+    failed.sort();
+    let running = worker.running;
+    let current = worker.current.clone();
+    let last_pass_finished = worker
+        .last_pass_finished
+        .map(|t| format_elapsed(t.elapsed()));
+    drop(worker);
+
+    let albums = scan_albums(&state.photos_dir)
+        .into_iter()
+        .map(|album| {
+            let photos = list_photos(&state.photos_dir.join(&album.slug));
+            let progress = BACKGROUND_PASSES
+                .iter()
+                .map(|pass| {
+                    let done = photos
+                        .iter()
+                        .filter(|p| {
+                            state
+                                .missing_thumbnails(&album.slug, &p.filename, *pass)
+                                .is_empty()
+                        })
+                        .count();
+                    Progress {
+                        done,
+                        total: photos.len(),
+                        percent: (done * 100).checked_div(photos.len()).unwrap_or(100),
+                    }
+                })
+                .collect();
+            AlbumStatus {
+                failed: failed.iter().filter(|(a, _)| *a == album.slug).count(),
+                slug: album.slug,
+                title: album.title,
+                progress,
+            }
+        })
+        .collect();
+
+    let template = StatusTemplate {
+        site_title: state.site_title.to_string(),
+        footer_snippet: state.footer_snippet.clone(),
+        running,
+        current,
+        last_pass_finished,
+        passes: BACKGROUND_PASSES
+            .iter()
+            .map(|&pass| pass_label(pass))
+            .collect(),
+        albums,
+        failed,
+    };
+    Ok(Html(template.render()?))
+}
+
+/// The thumbnail format and sizes of a pass, e.g. ("AVIF", "small, medium").
+fn pass_label((sizes, suffix): (&[&str], &str)) -> (&'static str, String) {
+    let format = if suffix.is_empty() { "JPEG" } else { "AVIF" };
+    (format, sizes.join(", "))
+}
+
+fn format_elapsed(elapsed: Duration) -> String {
+    match elapsed.as_secs() {
+        s @ 0..60 => format!("{s} s ago"),
+        s @ 60..3600 => format!("{} min ago", s / 60),
+        s => format!("{} h ago", s / 3600),
+    }
+}
+
 async fn serve_photo(
     State(state): State<AppState>,
     extract::Path((album, filename)): extract::Path<(String, String)>,
@@ -448,37 +588,33 @@ pub struct ThumbnailWorker {
 
 impl ThumbnailWorker {
     pub async fn run(self) {
-        // Photos that failed to render, with their modification time, so a
-        // broken file isn't decoded again on every pass until it's replaced.
-        let mut failed = HashSet::new();
+        self.status().running = true;
         loop {
-            self.render_missing(&mut failed).await;
+            self.render_missing().await;
+            self.status().last_pass_finished = Some(Instant::now());
             let _ =
                 tokio::time::timeout(RESCAN_INTERVAL, self.state.thumbnail_wakeup.notified()).await;
         }
     }
 
-    async fn render_missing(&self, failed: &mut HashSet<(PathBuf, Option<SystemTime>)>) {
-        for (sizes, suffix) in BACKGROUND_PASSES {
+    fn status(&self) -> std::sync::MutexGuard<'_, WorkerStatus> {
+        self.state.worker_status.lock().unwrap()
+    }
+
+    async fn render_missing(&self) {
+        for &pass in BACKGROUND_PASSES {
             for album in scan_albums(&self.state.photos_dir) {
                 let album_path = self.state.photos_dir.join(&album.slug);
                 for photo in list_photos(&album_path) {
                     let original = album_path.join(&photo.filename);
                     let modified = std::fs::metadata(&original).and_then(|m| m.modified()).ok();
                     let key = (original, modified);
-                    if failed.contains(&key) {
+                    if self.status().failed.contains(&key) {
                         continue;
                     }
-                    let missing = || -> Vec<(PathBuf, u32)> {
-                        sizes
-                            .iter()
-                            .filter_map(|size| {
-                                let name = format!("{}{suffix}", photo.filename);
-                                let path = self.state.thumb_path(&album.slug, size, &name);
-                                Some((path, thumb_max_dim(size)?))
-                            })
-                            .filter(|(path, _)| !path.is_file())
-                            .collect()
+                    let missing = || {
+                        self.state
+                            .missing_thumbnails(&album.slug, &photo.filename, pass)
                     };
                     if missing().is_empty() {
                         continue;
@@ -489,15 +625,22 @@ impl ThumbnailWorker {
                     };
                     // A request may have rendered some while we waited for a permit.
                     let targets = missing();
+                    let (format, sizes) = pass_label(pass);
+                    self.status().current = Some((
+                        format!("{}/{}", album.slug, photo.filename),
+                        format!("{format} {sizes}"),
+                    ));
                     let original = key.0.clone();
                     let result = tokio::task::spawn_blocking(move || {
                         let _permit = permit;
                         generate_thumbnails(&original, &targets)
                     })
                     .await;
+                    let mut status = self.status();
+                    status.current = None;
                     if !matches!(result, Ok(Ok(()))) {
                         tracing::warn!("failed to render thumbnails of {}", key.0.display());
-                        failed.insert(key);
+                        status.failed.insert(key);
                     }
                 }
             }
@@ -896,6 +1039,7 @@ mod tests {
             footer_snippet: None,
             thumbnail_permits: Arc::new(Semaphore::new(1)),
             thumbnail_wakeup: Arc::new(Notify::new()),
+            worker_status: Arc::default(),
         };
 
         // Simulate the browser giving up on the request mid-generation.

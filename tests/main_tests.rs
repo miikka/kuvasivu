@@ -113,6 +113,14 @@ async fn test_index_empty() {
 }
 
 #[tokio::test]
+async fn test_status_page() {
+    let env = setup_with_album();
+    let (status, body) = get(env.router, "/status").await;
+    assert_eq!(status, StatusCode::OK);
+    insta::assert_snapshot!("status_page", body);
+}
+
+#[tokio::test]
 async fn test_album_page() {
     let env = setup_with_album();
     let (status, body) = get(env.router, "/album/test-album").await;
@@ -253,6 +261,7 @@ async fn test_background_worker_renders_jpegs_then_avifs() {
     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/DSCF0263.jpg");
     fs::copy(&fixture, album_dir.join("photo-a.jpg")).unwrap();
     fs::copy(&fixture, album_dir.join("photo-b.jpg")).unwrap();
+    fs::write(album_dir.join("broken.jpg"), b"not a jpeg").unwrap();
     let cache_dir = dir.path().join("cache");
     let (router, worker) = kuvasivu::build_app(dir.path(), &cache_dir);
 
@@ -284,6 +293,18 @@ async fn test_background_worker_renders_jpegs_then_avifs() {
     .await
     .expect("worker should render all thumbnails");
     worker.abort();
+
+    let (_, body) = get(router.clone(), "/status").await;
+    assert!(
+        body.contains(r#"<span class="status-count">2/3</span>"#),
+        "{body}"
+    );
+    assert!(body.contains("1 failed"), "{body}");
+    assert!(
+        body.contains("<code>test-album/broken.jpg</code>"),
+        "{body}"
+    );
+    assert!(!body.contains("worker-stopped"), "{body}");
 
     let (_, body) = get(router.clone(), "/album/test-album").await;
     assert!(body.contains(r#"<source srcset="/thumbs/test-album/medium/photo-a.jpg.avif""#));

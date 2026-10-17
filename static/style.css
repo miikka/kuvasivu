@@ -323,3 +323,213 @@ picture {
         width: 100%;
     }
 }
+
+/* Status page */
+.status-page {
+    --status-panel: #fff;
+    --status-border: #e8e8e8;
+    --status-muted: #666;
+    --status-track: #ececec;
+    --status-fill: #8a8a8a;
+    --status-ok: #2e7d4f;
+    --status-busy: #c27c0e;
+    --status-error: #c0392b;
+}
+
+.status-panel {
+    background: var(--status-panel);
+    border-radius: 4px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    padding: 1.25rem 1.5rem;
+    margin-top: 1.5rem;
+    max-width: 900px;
+}
+
+.status-panel h2 {
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--status-muted);
+    margin-bottom: 0.75rem;
+}
+
+.status-detail {
+    color: var(--status-muted);
+    font-size: 0.9rem;
+}
+
+.status-page code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.85em;
+}
+
+.worker-state {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+
+.worker-state::before {
+    content: "";
+    width: 0.6rem;
+    height: 0.6rem;
+    border-radius: 50%;
+    background: var(--status-fill);
+}
+
+.worker-idle::before {
+    background: var(--status-ok);
+}
+
+.worker-busy::before {
+    background: var(--status-busy);
+    animation: status-pulse 1.2s ease-in-out infinite alternate;
+}
+
+@keyframes status-pulse {
+    to {
+        opacity: 0.3;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .worker-busy::before {
+        animation: none;
+    }
+}
+
+.status-table-scroll {
+    overflow-x: auto;
+}
+
+.status-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.95rem;
+}
+
+.status-table th,
+.status-table td {
+    padding: 0.6rem 1rem 0.6rem 0;
+    text-align: left;
+    vertical-align: top;
+    border-bottom: 1px solid var(--status-border);
+}
+
+.status-table tr:last-child td {
+    border-bottom: none;
+}
+
+.status-table th {
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.status-sizes {
+    display: block;
+    font-weight: 400;
+    font-size: 0.8rem;
+    color: var(--status-muted);
+}
+
+.status-table a {
+    color: inherit;
+    font-weight: 500;
+    text-decoration: none;
+}
+
+.status-table a:hover {
+    text-decoration: underline;
+}
+
+.status-count {
+    font-variant-numeric: tabular-nums;
+}
+
+.status-bar {
+    display: block;
+    width: 100%;
+    min-width: 5rem;
+    height: 4px;
+    margin-top: 0.3rem;
+    border-radius: 2px;
+    background: var(--status-track);
+    overflow: hidden;
+}
+
+.status-bar span {
+    display: block;
+    height: 100%;
+    background: var(--status-fill);
+}
+
+.status-complete .status-count {
+    color: var(--status-ok);
+}
+
+.status-complete .status-bar span {
+    background: var(--status-ok);
+}
+
+.status-failed-badge {
+    display: inline-block;
+    margin-left: 0.4rem;
+    padding: 0 0.4rem;
+    border-radius: 3px;
+    font-size: 0.75rem;
+    color: var(--status-error);
+    border: 1px solid currentColor;
+    white-space: nowrap;
+}
+
+.status-panel-failed {
+    border-left: 3px solid var(--status-error);
+}
+
+.status-failed-list {
+    list-style: none;
+    margin-top: 0.5rem;
+}
+
+.status-failed-list li {
+    padding: 0.2rem 0;
+}
+
+@media (prefers-color-scheme: dark) {
+    .status-page {
+        --status-panel: #1a1a1a;
+        --status-border: #2c2c2c;
+        --status-muted: #999;
+        --status-track: #333;
+        --status-fill: #777;
+        --status-ok: #5fbf87;
+        --status-busy: #e8a33d;
+        --status-error: #ef7b6e;
+    }
+
+    .status-panel {
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    }
+}
+
+@media (max-width: 600px) {
+    .status-panel {
+        padding: 1rem;
+    }
+
+    .status-table th,
+    .status-table td {
+        padding-right: 0.75rem;
+    }
+
+    .status-table th {
+        white-space: normal;
+    }
+
+    .status-bar {
+        min-width: 3rem;
+    }
+}
