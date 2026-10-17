@@ -20,6 +20,11 @@ SPDX-License-Identifier: MIT
     <main>
         {% block content %}{% endblock %}
     </main>
+    {% block footer %}
+    <footer class="powered-by">
+        <a href="https://github.com/miikka/kuvasivu/"><img src="/static/powered-by.svg" width="88" height="31" alt="Powered by kuvasivu"></a>
+    </footer>
+    {% endblock %}
     {% if let Some(snippet) = footer_snippet %}{{ snippet|safe }}{% endif %}
 </body>
 </html>

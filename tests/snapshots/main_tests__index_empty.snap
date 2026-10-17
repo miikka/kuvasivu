@@ -26,5 +26,10 @@ expression: body
 
     </main>
     
+    <footer class="powered-by">
+        <a href="https://github.com/miikka/kuvasivu/"><img src="/static/powered-by.svg" width="88" height="31" alt="Powered by kuvasivu"></a>
+    </footer>
+    
+    
 </body>
 </html>

@@ -126,6 +126,27 @@ picture {
     border-radius: 2px;
 }
 
+/* "Powered by" banner */
+.powered-by {
+    text-align: center;
+    padding: 1rem 2rem 2rem;
+}
+
+.powered-by a {
+    display: inline-block;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+}
+
+.powered-by a:hover,
+.powered-by a:focus-visible {
+    opacity: 1;
+}
+
+.powered-by img {
+    display: block;
+}
+
 /* Photo page: full-viewport layout */
 .photo-page header {
     display: none;
@@ -247,6 +268,10 @@ picture {
 
     .album-placeholder {
         background: #333;
+    }
+
+    .powered-by img {
+        filter: invert(0.93);
     }
 }
 
