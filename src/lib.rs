@@ -6,6 +6,7 @@ mod exif;
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use askama::Template;
@@ -18,6 +19,7 @@ use image::codecs::avif::AvifEncoder;
 use image::imageops::FilterType;
 use image::{DynamicImage, ImageFormat};
 use serde::Deserialize;
+use tokio::sync::Semaphore;
 use tower_http::services::ServeDir;
 
 use exif::{ExifInfo, read_exif_info};
@@ -55,6 +57,11 @@ const LARGE_SIZE: u32 = 4096;
 const AVIF_SPEED: u8 = 6;
 const AVIF_QUALITY: u8 = 80;
 
+// Each generation decodes a full original (~250MB peak for a 40MP photo), and
+// the AVIF encoder already uses every core, so more parallelism only costs
+// memory. Unbounded, a big uncached album page ran the server out of memory.
+const MAX_CONCURRENT_THUMBNAILS: usize = 2;
+
 #[derive(Deserialize)]
 struct SiteConfig {
     title: Option<String>,
@@ -67,6 +74,7 @@ struct AppState {
     cache_dir: PathBuf,
     site_title: String,
     footer_snippet: Option<String>,
+    thumbnail_permits: Arc<Semaphore>,
 }
 
 #[derive(Deserialize, Default)]
@@ -89,6 +97,8 @@ struct Album {
 struct Photo {
     filename: String,
     date: Option<String>,
+    /// Pixel dimensions, so the album grid can reserve space before thumbnails load.
+    dimensions: Option<(u32, u32)>,
 }
 
 #[derive(Template)]
@@ -144,6 +154,7 @@ pub fn build_router(data_dir: &Path, cache_dir: &Path) -> Router {
         cache_dir: cache_dir.to_path_buf(),
         site_title: config.title.unwrap_or_else(|| "Kuvasivu".to_string()),
         footer_snippet: config.footer_snippet,
+        thumbnail_permits: Arc::new(Semaphore::new(MAX_CONCURRENT_THUMBNAILS)),
     };
 
     Router::new()
@@ -182,7 +193,11 @@ async fn album(
         return Err(AppError::NotFound);
     }
 
-    let photos = list_photos(&album_path);
+    let mut photos = list_photos(&album_path);
+    for photo in &mut photos {
+        // Only reads the image header, not the pixel data.
+        photo.dimensions = image::image_dimensions(album_path.join(&photo.filename)).ok();
+    }
     let album = load_album(&slug, &album_path, &photos);
 
     let site_title = state.site_title.to_string();
@@ -280,13 +295,25 @@ async fn serve_thumb(
     let thumb_path = thumb_dir.join(&filename);
 
     if !thumb_path.is_file() {
-        let thumb_path = thumb_path.clone();
-        // Encoding (AVIF especially) is CPU-heavy; keep it off the async runtime.
-        tokio::task::spawn_blocking(move || {
-            generate_thumbnail(&original, &thumb_path, &thumb_dir, max_dim)
-        })
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)??;
+        let permit = state
+            .thumbnail_permits
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        // Another request may have generated it while we waited for a permit.
+        if !thumb_path.is_file() {
+            let thumb_path = thumb_path.clone();
+            // Encoding (AVIF especially) is CPU-heavy; keep it off the async runtime.
+            // The blocking task owns the permit: it keeps running if the client
+            // disconnects, so it must keep counting against the limit too.
+            tokio::task::spawn_blocking(move || {
+                let _permit = permit;
+                generate_thumbnail(&original, &thumb_path, &thumb_dir, max_dim)
+            })
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)??;
+        }
     }
 
     serve_file(&thumb_path).await
@@ -437,6 +464,7 @@ fn list_photos(album_path: &Path) -> Vec<Photo> {
             photos.push(Photo {
                 filename: name,
                 date,
+                dimensions: None,
             });
         }
     }
@@ -697,6 +725,34 @@ mod tests {
         assert_eq!(album.description, "");
         assert_eq!(album.timespan, "");
         assert!(album.cover.is_none());
+    }
+
+    #[tokio::test]
+    async fn thumbnail_permit_outlives_cancelled_request() {
+        let dir = tempfile::tempdir().unwrap();
+        let photos_dir = dir.path().join("photos");
+        fs::create_dir_all(photos_dir.join("album")).unwrap();
+        fs::copy(fixture_path(), photos_dir.join("album/photo.jpg")).unwrap();
+        let state = AppState {
+            photos_dir,
+            cache_dir: dir.path().join("cache"),
+            site_title: String::new(),
+            footer_snippet: None,
+            thumbnail_permits: Arc::new(Semaphore::new(1)),
+        };
+
+        // Simulate the browser giving up on the request mid-generation.
+        let request = serve_thumb(
+            State(state.clone()),
+            extract::Path(("album".into(), "medium".into(), "photo.jpg".into())),
+        );
+        let cancelled = tokio::time::timeout(std::time::Duration::from_millis(1), request).await;
+        assert!(cancelled.is_err(), "generation should take longer than 1ms");
+
+        // The generation keeps running, so it must still hold the permit.
+        assert_eq!(state.thumbnail_permits.available_permits(), 0);
+        let _permit = state.thumbnail_permits.acquire().await.unwrap();
+        assert!(dir.path().join("cache/album/medium/photo.jpg").is_file());
     }
 
     #[test]

@@ -122,7 +122,10 @@ picture {
 
 .photo-card img {
     width: 100%;
+    height: auto;
     display: block;
+    /* Placeholder while the thumbnail loads. */
+    background: #e0e0e0;
     border-radius: 2px;
 }
 
@@ -266,7 +269,8 @@ picture {
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
     }
 
-    .album-placeholder {
+    .album-placeholder,
+    .photo-card img {
         background: #333;
     }
 
