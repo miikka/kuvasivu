@@ -20,6 +20,9 @@ jobs:
         with:
           persist-credentials: false
 
+      # rav1e (the AVIF encoder) needs nasm for its x86_64 SIMD assembly.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends nasm
+
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - uses: taiki-e/install-action@85b24a67ef0c632dfefad70b9d5ce8fddb040754 # v2.75.10
