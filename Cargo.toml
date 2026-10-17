@@ -14,7 +14,7 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)'] }
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
 askama = "0.15"
-image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+image = { version = "0.25", default-features = false, features = ["avif", "jpeg", "png", "webp"] }
 kamadak-exif = "0.6"
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"

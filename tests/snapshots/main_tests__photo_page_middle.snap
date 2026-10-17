@@ -1,5 +1,6 @@
 ---
 source: tests/main_tests.rs
+assertion_line: 136
 expression: body
 ---
 
@@ -31,7 +32,10 @@ expression: body
         <a href="/album/test-album/photo-a.jpg" class="photo-nav photo-nav-prev" aria-label="Previous photo">&lsaquo;</a>
 
         <div class="photo-main">
-            <img src="/thumbs/test-album/medium/photo-b.jpg" alt="photo-b.jpg">
+            <picture>
+                <source srcset="/thumbs/test-album/large/photo-b.jpg.avif" type="image/avif">
+                <img src="/photos/test-album/photo-b.jpg" alt="photo-b.jpg">
+            </picture>
         </div>
 
         <a href="/album/test-album/photo-c.jpg" class="photo-nav photo-nav-next" aria-label="Next photo">&rsaquo;</a>
@@ -45,6 +49,7 @@ expression: body
     var prevLink = document.querySelector('.photo-nav-prev');
     var nextLink = document.querySelector('.photo-nav-next');
     var mainImg = document.querySelector('.photo-main img');
+    var mainSource = document.querySelector('.photo-main source');
     var exifSpan = document.querySelector('.photo-exif');
     var topbar = document.querySelector('.photo-topbar');
 
@@ -52,12 +57,19 @@ expression: body
         if (cache[url]) return cache[url];
         cache[url] = fetch(url).then(function(r) { return r.text(); }).then(function(html) {
             var doc = new DOMParser().parseFromString(html, 'text/html');
-            var imgSrc = doc.querySelector('.photo-main img').getAttribute('src');
             // preload the image into browser cache
-            new Image().src = imgSrc;
+            loadImage(doc);
             return doc;
         });
         return cache[url];
+    }
+
+    // Starts loading the photo of a fetched page. Cloning the whole <picture>
+    // lets the browser choose between the AVIF source and the fallback.
+    function loadImage(doc) {
+        var picture = doc.querySelector('.photo-main picture');
+        if (!picture) return null;
+        return document.importNode(picture, true).querySelector('img');
     }
 
     function updateNav(linkEl, newEl) {
@@ -76,14 +88,18 @@ expression: body
         navigating = true;
         fetchPage(url).then(function(doc) {
             var newImg = doc.querySelector('.photo-main img');
-            if (!newImg) { window.location = url; return; }
-            var imgSrc = newImg.getAttribute('src');
+            var newSource = doc.querySelector('.photo-main source');
+            var loader = loadImage(doc);
+            if (!newImg || !loader) { window.location = url; return; }
 
             // preload image, then swap src once decoded
-            var loader = new Image();
             loader.onload = loader.onerror = function() {
+                loader.onload = loader.onerror = null; // run once
                 // update image in place — old image stays visible until new src paints
-                mainImg.src = imgSrc;
+                if (mainSource && newSource) {
+                    mainSource.srcset = newSource.getAttribute('srcset');
+                }
+                mainImg.src = newImg.getAttribute('src');
                 mainImg.alt = newImg.getAttribute('alt') || '';
 
                 // update nav links
@@ -109,7 +125,6 @@ expression: body
                 preloadAdjacent();
                 navigating = false;
             };
-            loader.src = imgSrc;
             if (loader.complete) loader.onload();
         });
     }

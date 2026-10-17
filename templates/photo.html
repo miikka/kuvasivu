@@ -23,7 +23,10 @@ SPDX-License-Identifier: MIT
         <a {% if let Some(prev) = prev %}href="/album/{{ album.slug }}/{{ prev.filename }}"{% endif %} class="photo-nav photo-nav-prev{% if prev.is_none() %} photo-nav-disabled{% endif %}" aria-label="Previous photo">&lsaquo;</a>
 
         <div class="photo-main">
-            <img src="/thumbs/{{ album.slug }}/medium/{{ photo.filename }}" alt="{{ photo.filename }}">
+            <picture>
+                <source srcset="/thumbs/{{ album.slug }}/large/{{ photo.filename }}.avif" type="image/avif">
+                <img src="/photos/{{ album.slug }}/{{ photo.filename }}" alt="{{ photo.filename }}">
+            </picture>
         </div>
 
         <a {% if let Some(next) = next %}href="/album/{{ album.slug }}/{{ next.filename }}"{% endif %} class="photo-nav photo-nav-next{% if next.is_none() %} photo-nav-disabled{% endif %}" aria-label="Next photo">&rsaquo;</a>
@@ -37,6 +40,7 @@ SPDX-License-Identifier: MIT
     var prevLink = document.querySelector('.photo-nav-prev');
     var nextLink = document.querySelector('.photo-nav-next');
     var mainImg = document.querySelector('.photo-main img');
+    var mainSource = document.querySelector('.photo-main source');
     var exifSpan = document.querySelector('.photo-exif');
     var topbar = document.querySelector('.photo-topbar');
 
@@ -44,12 +48,19 @@ SPDX-License-Identifier: MIT
         if (cache[url]) return cache[url];
         cache[url] = fetch(url).then(function(r) { return r.text(); }).then(function(html) {
             var doc = new DOMParser().parseFromString(html, 'text/html');
-            var imgSrc = doc.querySelector('.photo-main img').getAttribute('src');
             // preload the image into browser cache
-            new Image().src = imgSrc;
+            loadImage(doc);
             return doc;
         });
         return cache[url];
+    }
+
+    // Starts loading the photo of a fetched page. Cloning the whole <picture>
+    // lets the browser choose between the AVIF source and the fallback.
+    function loadImage(doc) {
+        var picture = doc.querySelector('.photo-main picture');
+        if (!picture) return null;
+        return document.importNode(picture, true).querySelector('img');
     }
 
     function updateNav(linkEl, newEl) {
@@ -68,14 +79,18 @@ SPDX-License-Identifier: MIT
         navigating = true;
         fetchPage(url).then(function(doc) {
             var newImg = doc.querySelector('.photo-main img');
-            if (!newImg) { window.location = url; return; }
-            var imgSrc = newImg.getAttribute('src');
+            var newSource = doc.querySelector('.photo-main source');
+            var loader = loadImage(doc);
+            if (!newImg || !loader) { window.location = url; return; }
 
             // preload image, then swap src once decoded
-            var loader = new Image();
             loader.onload = loader.onerror = function() {
+                loader.onload = loader.onerror = null; // run once
                 // update image in place — old image stays visible until new src paints
-                mainImg.src = imgSrc;
+                if (mainSource && newSource) {
+                    mainSource.srcset = newSource.getAttribute('srcset');
+                }
+                mainImg.src = newImg.getAttribute('src');
                 mainImg.alt = newImg.getAttribute('alt') || '';
 
                 // update nav links
@@ -101,7 +116,6 @@ SPDX-License-Identifier: MIT
                 preloadAdjacent();
                 navigating = false;
             };
-            loader.src = imgSrc;
             if (loader.complete) loader.onload();
         });
     }

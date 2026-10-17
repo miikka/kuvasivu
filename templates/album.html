@@ -20,7 +20,10 @@ SPDX-License-Identifier: MIT
 <div class="photo-grid">
     {% for photo in photos %}
     <a href="/album/{{ album.slug }}/{{ photo.filename }}" class="photo-card">
-        <img src="/thumbs/{{ album.slug }}/medium/{{ photo.filename }}" alt="{{ photo.filename }}" loading="lazy">
+        <picture>
+            <source srcset="/thumbs/{{ album.slug }}/medium/{{ photo.filename }}.avif" type="image/avif">
+            <img src="/thumbs/{{ album.slug }}/medium/{{ photo.filename }}" alt="{{ photo.filename }}" loading="lazy">
+        </picture>
     </a>
     {% endfor %}
 </div>

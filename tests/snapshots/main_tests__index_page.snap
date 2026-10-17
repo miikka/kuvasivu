@@ -1,5 +1,6 @@
 ---
 source: tests/main_tests.rs
+assertion_line: 104
 expression: body
 ---
 
@@ -25,7 +26,10 @@ expression: body
     
     <a href="/album/test-album" class="album-card">
         
-        <img src="/thumbs/test-album/small/photo-a.jpg" alt="Test Album" loading="lazy">
+        <picture>
+            <source srcset="/thumbs/test-album/small/photo-a.jpg.avif" type="image/avif">
+            <img src="/thumbs/test-album/small/photo-a.jpg" alt="Test Album" loading="lazy">
+        </picture>
         
         <div class="album-info">
             <h2>Test Album</h2>

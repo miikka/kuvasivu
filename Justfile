@@ -13,7 +13,8 @@ docker-run: docker-build
       -v ./photos:/data/photos \
       kuvasivu
 
-ci: test lint
+# CI also runs the slow ignored tests (e.g. AVIF encoding).
+ci: (test "--run-ignored" "all") lint
 
 lint:
     cargo fmt --check
@@ -23,9 +24,13 @@ lint:
 run:
     cargo run
 
-test:
-    cargo llvm-cov nextest --show-missing-lines
+test *args:
+    cargo llvm-cov nextest --show-missing-lines {{args}}
     ./tests/docker_test.sh
+
+# AVIF encoding tests are slow in debug builds, so they're skipped by default.
+test-avif:
+    cargo nextest run --run-ignored only avif
 
 test-cov:
     cargo llvm-cov --html

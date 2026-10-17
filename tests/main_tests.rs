@@ -235,6 +235,52 @@ async fn test_serve_thumb_medium() {
 }
 
 #[tokio::test]
+#[ignore = "slow AVIF encoding in debug builds; run with `just test-avif`"]
+async fn test_serve_thumb_avif() {
+    let env = setup_with_album();
+    let (status, body, content_type) =
+        get_bytes(env.router, "/thumbs/test-album/small/photo-a.jpg.avif").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(content_type, "image/avif");
+    assert_eq!(&body[4..12], b"ftypavif");
+
+    // Only the final thumbnail is left in the cache, no temp files.
+    let thumb_dir = env._dir.path().join("cache/test-album/small");
+    let names: Vec<_> = fs::read_dir(thumb_dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert_eq!(names, vec!["photo-a.jpg.avif"]);
+}
+
+#[tokio::test]
+async fn test_serve_thumb_avif_missing_photo() {
+    let env = setup_with_album();
+    assert_eq!(
+        get_status(env.router, "/thumbs/test-album/small/nope.jpg.avif").await,
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
+async fn test_serve_thumb_large_does_not_upscale() {
+    let dir = tempfile::tempdir().unwrap();
+    let album_dir = dir.path().join("photos").join("test-album");
+    fs::create_dir_all(&album_dir).unwrap();
+    // 640x427, smaller than the large size.
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/DSCF0263.jpg");
+    fs::copy(fixture, album_dir.join("photo.jpg")).unwrap();
+
+    let router = kuvasivu::build_router(dir.path(), &dir.path().join("cache"));
+    let (status, body, content_type) =
+        get_bytes(router, "/thumbs/test-album/large/photo.jpg").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(content_type, "image/jpeg");
+    let img = image::load_from_memory(&body).unwrap();
+    assert_eq!((img.width(), img.height()), (640, 427));
+}
+
+#[tokio::test]
 async fn test_serve_thumb_invalid_size() {
     let env = setup_with_album();
     assert_eq!(

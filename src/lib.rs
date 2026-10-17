@@ -6,6 +6,7 @@ mod exif;
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use askama::Template;
 use axum::Router;
@@ -13,7 +14,9 @@ use axum::extract::{self, State};
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
+use image::codecs::avif::AvifEncoder;
 use image::imageops::FilterType;
+use image::{DynamicImage, ImageFormat};
 use serde::Deserialize;
 use tower_http::services::ServeDir;
 
@@ -45,6 +48,12 @@ impl IntoResponse for AppError {
 
 const SMALL_SIZE: u32 = 400;
 const MEDIUM_SIZE: u32 = 1200;
+// Full resolution for the photo page, capped so huge originals stay encodable.
+const LARGE_SIZE: u32 = 4096;
+
+// Speed 6 encodes ~3x faster than the default 4 for ~3% larger files.
+const AVIF_SPEED: u8 = 6;
+const AVIF_QUALITY: u8 = 80;
 
 #[derive(Deserialize)]
 struct SiteConfig {
@@ -254,11 +263,15 @@ async fn serve_thumb(
     let max_dim = match size.as_str() {
         "small" => SMALL_SIZE,
         "medium" => MEDIUM_SIZE,
+        "large" => LARGE_SIZE,
         _ => return Err(StatusCode::BAD_REQUEST),
     };
 
+    // `photo.jpg.avif` is an AVIF-encoded thumbnail of `photo.jpg`.
+    let original_name = filename.strip_suffix(".avif").unwrap_or(&filename);
+
     let album_path = state.photos_dir.join(&album);
-    let original = album_path.join(&filename);
+    let original = album_path.join(original_name);
     if !original.is_file() {
         return Err(StatusCode::NOT_FOUND);
     }
@@ -267,7 +280,13 @@ async fn serve_thumb(
     let thumb_path = thumb_dir.join(&filename);
 
     if !thumb_path.is_file() {
-        generate_thumbnail(&original, &thumb_path, &thumb_dir, max_dim)?;
+        let thumb_path = thumb_path.clone();
+        // Encoding (AVIF especially) is CPU-heavy; keep it off the async runtime.
+        tokio::task::spawn_blocking(move || {
+            generate_thumbnail(&original, &thumb_path, &thumb_dir, max_dim)
+        })
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)??;
     }
 
     serve_file(&thumb_path).await
@@ -281,11 +300,44 @@ fn generate_thumbnail(
 ) -> Result<(), StatusCode> {
     std::fs::create_dir_all(thumb_dir).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let img = image::open(original).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let thumb = img.resize(max_dim, max_dim, FilterType::Lanczos3);
-    thumb
-        .save(thumb_path)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    // Only ever scale down.
+    let thumb = if img.width() > max_dim || img.height() > max_dim {
+        img.resize(max_dim, max_dim, FilterType::Lanczos3)
+    } else {
+        img
+    };
+
+    // Write to a unique temp file and rename, so concurrent requests never
+    // see (and serve) a partially written thumbnail.
+    static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+    let tmp_path = thumb_dir.join(format!(
+        ".tmp-{}-{}",
+        TMP_COUNTER.fetch_add(1, Ordering::Relaxed),
+        thumb_path.file_name().unwrap_or_default().to_string_lossy()
+    ));
+    let result = write_thumbnail(&thumb, &tmp_path, thumb_path)
+        .and_then(|()| std::fs::rename(&tmp_path, thumb_path).map_err(|_| ()));
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    }
     Ok(())
+}
+
+/// Encodes `thumb` into `path`, picking the format from `final_path`'s extension.
+fn write_thumbnail(thumb: &DynamicImage, path: &Path, final_path: &Path) -> Result<(), ()> {
+    let format = ImageFormat::from_path(final_path).map_err(|_| ())?;
+    if format == ImageFormat::Avif {
+        let file = std::fs::File::create(path).map_err(|_| ())?;
+        let encoder = AvifEncoder::new_with_speed_quality(
+            std::io::BufWriter::new(file),
+            AVIF_SPEED,
+            AVIF_QUALITY,
+        );
+        thumb.write_with_encoder(encoder).map_err(|_| ())
+    } else {
+        thumb.save_with_format(path, format).map_err(|_| ())
+    }
 }
 
 async fn serve_file(path: &Path) -> Result<impl IntoResponse + use<>, StatusCode> {
@@ -301,6 +353,7 @@ async fn serve_file(path: &Path) -> Result<impl IntoResponse + use<>, StatusCode
         Some("jpg" | "jpeg") => "image/jpeg",
         Some("png") => "image/png",
         Some("webp") => "image/webp",
+        Some("avif") => "image/avif",
         _ => "application/octet-stream",
     };
 
