@@ -54,6 +54,8 @@ impl IntoResponse for AppError {
 
 const SMALL_SIZE: u32 = 400;
 const MEDIUM_SIZE: u32 = 1200;
+// Enough for phones and most laptops on the photo page.
+const SCREEN_SIZE: u32 = 2048;
 // Full resolution for the photo page, capped so huge originals stay encodable.
 const LARGE_SIZE: u32 = 4096;
 
@@ -76,10 +78,13 @@ const TMP_PREFIX: &str = ".tmp-";
 /// the AVIFs take far longer to encode, so pages link to them only once they
 /// are ready. Grid-sized AVIFs come before the large ones for the photo page.
 const BACKGROUND_PASSES: &[(&[&str], &str)] = &[
-    (&["small", "medium"], ""),
+    (&["small", "medium", "screen"], ""),
     (&["small", "medium"], ".avif"),
-    (&["large"], ".avif"),
+    (&["screen", "large"], ".avif"),
 ];
+
+/// The AVIF sizes the photo page offers, smallest first.
+const PHOTO_PAGE_AVIF_SIZES: &[&str] = &["medium", "screen", "large"];
 
 /// How often the worker looks for new photos when no page view wakes it up.
 const RESCAN_INTERVAL: Duration = Duration::from_secs(60);
@@ -266,6 +271,11 @@ struct PhotoTemplate {
     prev: Option<Photo>,
     next: Option<Photo>,
     exif: ExifInfo,
+    /// `srcset`s of the photo, so phones don't load full-size images. `None`
+    /// if the photo's dimensions are unknown, or for AVIF, until the
+    /// background worker has rendered them all.
+    jpeg_srcset: Option<String>,
+    avif_srcset: Option<String>,
 }
 
 impl PhotoTemplate {
@@ -436,12 +446,38 @@ async fn photo(
     let prev = index.checked_sub(1).map(|i| photos[i].clone());
     let next = photos.get(index + 1).cloned();
     let mut photo = photos[index].clone();
-    photo.avif = state.avif_ready(&slug, "large", &photo.filename);
+    // The medium thumbnail stands in while the next photo loads.
+    photo.avif = state.avif_ready(&slug, "medium", &photo.filename);
 
     let album = load_album(&slug, &album_path, &photos);
 
     let photo_path = album_path.join(&filename);
     let exif = read_exif_info(&photo_path);
+
+    // Only reads the image header, not the pixel data.
+    let dimensions = image::image_dimensions(&photo_path).ok();
+    let thumb = |size: &str| format!("/thumbs/{slug}/{size}/{filename}");
+    let jpeg_srcset = dimensions.map(|dims| {
+        photo_srcset(
+            dims,
+            [
+                (thumb("medium"), Some(MEDIUM_SIZE)),
+                (thumb("screen"), Some(SCREEN_SIZE)),
+                (format!("/photos/{slug}/{filename}"), None),
+            ],
+        )
+    });
+    let avif_ready = PHOTO_PAGE_AVIF_SIZES
+        .iter()
+        .all(|size| state.avif_ready(&slug, size, &filename));
+    let avif_srcset = dimensions.filter(|_| avif_ready).map(|dims| {
+        photo_srcset(
+            dims,
+            PHOTO_PAGE_AVIF_SIZES
+                .iter()
+                .map(|size| (thumb(size) + ".avif", thumb_max_dim(size))),
+        )
+    });
 
     let site_title = state.site_title.to_string();
     let footer_snippet = state.footer_snippet.clone();
@@ -455,9 +491,36 @@ async fn photo(
             prev,
             next,
             exif,
+            jpeg_srcset,
+            avif_srcset,
         })
         .render()?,
     ))
+}
+
+/// Builds a `srcset` from a photo's `(width, height)` and its renditions as
+/// (URL, max dimension), smallest first, where `None` means full size.
+/// Renditions after the first that isn't scaled down are the same size as it,
+/// so they're left out.
+fn photo_srcset(
+    (width, height): (u32, u32),
+    renditions: impl IntoIterator<Item = (String, Option<u32>)>,
+) -> String {
+    let longest = width.max(height);
+    let mut candidates = Vec::new();
+    for (url, max_dim) in renditions {
+        let scaled_width = match max_dim {
+            Some(max_dim) if max_dim < longest => {
+                u64::from(width) * u64::from(max_dim) / u64::from(longest)
+            }
+            _ => u64::from(width),
+        };
+        candidates.push(format!("{url} {scaled_width}w"));
+        if scaled_width == u64::from(width) {
+            break;
+        }
+    }
+    candidates.join(", ")
 }
 
 async fn status(State(state): State<AppState>) -> Result<impl IntoResponse, AppError> {
@@ -621,6 +684,7 @@ fn thumb_max_dim(size: &str) -> Option<u32> {
     match size {
         "small" => Some(SMALL_SIZE),
         "medium" => Some(MEDIUM_SIZE),
+        "screen" => Some(SCREEN_SIZE),
         "large" => Some(LARGE_SIZE),
         _ => None,
     }
@@ -916,6 +980,25 @@ mod tests {
     #[test]
     fn slug_to_title_multiple_hyphens() {
         assert_eq!(slug_to_title("my-cool-album"), "My Cool Album");
+    }
+
+    #[test]
+    fn photo_srcset_scales_by_longest_side() {
+        let renditions = [
+            ("m".to_string(), Some(1200)),
+            ("s".to_string(), Some(2048)),
+            ("o".to_string(), None),
+        ];
+        assert_eq!(
+            photo_srcset((3000, 4000), renditions.clone()),
+            "m 900w, s 1536w, o 3000w"
+        );
+        // Renditions that aren't scaled down are all the same size.
+        assert_eq!(
+            photo_srcset((1600, 1000), renditions.clone()),
+            "m 1200w, s 1600w"
+        );
+        assert_eq!(photo_srcset((640, 427), renditions), "m 640w");
     }
 
     fn fixture_path() -> PathBuf {
