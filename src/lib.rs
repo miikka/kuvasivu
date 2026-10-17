@@ -62,6 +62,9 @@ const AVIF_QUALITY: u8 = 80;
 // memory. Unbounded, a big uncached album page ran the server out of memory.
 const MAX_CONCURRENT_THUMBNAILS: usize = 2;
 
+// Thumbnails are written to `<thumb dir>/.tmp-N-<name>` and renamed into place.
+const TMP_PREFIX: &str = ".tmp-";
+
 #[derive(Deserialize)]
 struct SiteConfig {
     title: Option<String>,
@@ -147,6 +150,7 @@ fn is_safe_path_segment(segment: &str) -> bool {
 }
 
 pub fn build_router(data_dir: &Path, cache_dir: &Path) -> Router {
+    remove_stale_temp_files(cache_dir);
     let config = load_site_config(data_dir);
     let photos_dir = data_dir.join("photos");
     let state = AppState {
@@ -165,6 +169,22 @@ pub fn build_router(data_dir: &Path, cache_dir: &Path) -> Router {
         .route("/thumbs/{album}/{size}/{filename}", get(serve_thumb))
         .nest_service("/static", ServeDir::new("static"))
         .with_state(state)
+}
+
+/// Removes temp files left behind by thumbnail encodes that were interrupted
+/// (crash, OOM kill, restart). Nothing is encoding yet at startup, so every
+/// temp file in the cache is stale.
+fn remove_stale_temp_files(cache_dir: &Path) {
+    let list = |dir: &Path| std::fs::read_dir(dir).into_iter().flatten().flatten();
+    for album in list(cache_dir) {
+        for size in list(&album.path()) {
+            for entry in list(&size.path()) {
+                if entry.file_name().to_string_lossy().starts_with(TMP_PREFIX) {
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+        }
+    }
 }
 
 async fn index(State(state): State<AppState>) -> Result<impl IntoResponse, AppError> {
@@ -338,7 +358,7 @@ fn generate_thumbnail(
     // see (and serve) a partially written thumbnail.
     static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
     let tmp_path = thumb_dir.join(format!(
-        ".tmp-{}-{}",
+        "{TMP_PREFIX}{}-{}",
         TMP_COUNTER.fetch_add(1, Ordering::Relaxed),
         thumb_path.file_name().unwrap_or_default().to_string_lossy()
     ));

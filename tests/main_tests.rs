@@ -253,6 +253,24 @@ async fn test_serve_thumb_avif() {
     assert_eq!(names, vec!["photo-a.jpg.avif"]);
 }
 
+#[test]
+fn test_startup_removes_stale_temp_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let thumb_dir = dir.path().join("cache/test-album/small");
+    fs::create_dir_all(&thumb_dir).unwrap();
+    // Left behind by an encode that was killed mid-write.
+    fs::write(thumb_dir.join(".tmp-7-photo-a.jpg.avif"), b"").unwrap();
+    fs::write(thumb_dir.join("photo-b.jpg.avif"), b"done").unwrap();
+
+    kuvasivu::build_router(dir.path(), &dir.path().join("cache"));
+
+    let names: Vec<_> = fs::read_dir(thumb_dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert_eq!(names, vec!["photo-b.jpg.avif"]);
+}
+
 #[tokio::test]
 async fn test_serve_thumb_avif_missing_photo() {
     let env = setup_with_album();
