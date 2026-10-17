@@ -14,7 +14,7 @@ SPDX-License-Identifier: MIT
 - Rust/Axum backend with askama HTML templates
 - Filesystem-based album management: each album is a directory under `photos/`
 - Album metadata in `album.toml` (title, description, optional timespan)
-- Thumbnails generated on-demand via `image` crate, cached to a separate cache dir (`KUVASIVU_CACHE_DIR`, defaults to `cache/` under data dir)
+- Thumbnails rendered by a background worker (JPEGs first, then AVIFs; pages link AVIFs only once they exist) via `image` crate, JPEGs also on request, cached to a separate cache dir (`KUVASIVU_CACHE_DIR`, defaults to `cache/` under data dir)
 - EXIF date extraction via `kamadak-exif` for auto-deriving album timespans
 
 ## Conventions

@@ -37,7 +37,7 @@ description = "A short description."
 timespan = "January 2026"   # optional, auto-derived from EXIF if omitted
 ```
 
-Thumbnails are generated on-demand and cached in a separate cache directory.
+Thumbnails are generated in the background and cached in a separate cache directory: first JPEGs, then AVIFs, which pages use once they are ready. A JPEG that isn't ready yet is generated on request.
 
 ## Configuration
 

@@ -26,7 +26,9 @@ SPDX-License-Identifier: MIT
 
         <div class="photo-main">
             <picture>
+                {%- if photo.avif %}
                 <source srcset="/thumbs/{{ album.slug }}/large/{{ photo.filename }}.avif" type="image/avif">
+                {%- endif %}
                 <img src="/photos/{{ album.slug }}/{{ photo.filename }}" alt="{{ photo.filename }}">
             </picture>
         </div>
@@ -89,8 +91,17 @@ SPDX-License-Identifier: MIT
             loader.onload = loader.onerror = function() {
                 loader.onload = loader.onerror = null; // run once
                 // update image in place — old image stays visible until new src paints
-                if (mainSource && newSource) {
+                // the AVIF source is only there once it has been rendered
+                if (newSource) {
+                    if (!mainSource) {
+                        mainSource = document.createElement('source');
+                        mainSource.type = 'image/avif';
+                        mainImg.parentNode.insertBefore(mainSource, mainImg);
+                    }
                     mainSource.srcset = newSource.getAttribute('srcset');
+                } else if (mainSource) {
+                    mainSource.remove();
+                    mainSource = null;
                 }
                 mainImg.src = newImg.getAttribute('src');
                 mainImg.alt = newImg.getAttribute('alt') || '';

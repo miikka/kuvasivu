@@ -31,21 +31,18 @@ expression: body
     
     <a href="/album/test-album/photo-a.jpg" class="photo-card">
         <picture>
-            <source srcset="/thumbs/test-album/medium/photo-a.jpg.avif" type="image/avif">
             <img src="/thumbs/test-album/medium/photo-a.jpg" alt="photo-a.jpg" width="2048" height="1365" loading="lazy">
         </picture>
     </a>
     
     <a href="/album/test-album/photo-b.jpg" class="photo-card">
         <picture>
-            <source srcset="/thumbs/test-album/medium/photo-b.jpg.avif" type="image/avif">
             <img src="/thumbs/test-album/medium/photo-b.jpg" alt="photo-b.jpg" width="2048" height="1365" loading="lazy">
         </picture>
     </a>
     
     <a href="/album/test-album/photo-c.jpg" class="photo-card">
         <picture>
-            <source srcset="/thumbs/test-album/medium/photo-c.jpg.avif" type="image/avif">
             <img src="/thumbs/test-album/medium/photo-c.jpg" alt="photo-c.jpg" width="2048" height="1365" loading="lazy">
         </picture>
     </a>

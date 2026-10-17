@@ -4,10 +4,12 @@
 
 mod exif;
 
+use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, SystemTime};
 
 use askama::Template;
 use axum::Router;
@@ -19,7 +21,7 @@ use image::codecs::avif::AvifEncoder;
 use image::imageops::FilterType;
 use image::{DynamicImage, ImageFormat};
 use serde::Deserialize;
-use tokio::sync::Semaphore;
+use tokio::sync::{Notify, Semaphore};
 use tower_http::services::ServeDir;
 
 use exif::{ExifInfo, read_exif_info};
@@ -65,6 +67,19 @@ const MAX_CONCURRENT_THUMBNAILS: usize = 2;
 // Thumbnails are written to `<thumb dir>/.tmp-N-<name>` and renamed into place.
 const TMP_PREFIX: &str = ".tmp-";
 
+/// Thumbnails the background worker renders, as (sizes, filename suffix)
+/// passes run in order. JPEGs come first so a new album is quickly browsable;
+/// the AVIFs take far longer to encode, so pages link to them only once they
+/// are ready. Grid-sized AVIFs come before the large ones for the photo page.
+const BACKGROUND_PASSES: &[(&[&str], &str)] = &[
+    (&["small", "medium"], ""),
+    (&["small", "medium"], ".avif"),
+    (&["large"], ".avif"),
+];
+
+/// How often the worker looks for new photos when no page view wakes it up.
+const RESCAN_INTERVAL: Duration = Duration::from_secs(60);
+
 #[derive(Deserialize)]
 struct SiteConfig {
     title: Option<String>,
@@ -78,6 +93,26 @@ struct AppState {
     site_title: String,
     footer_snippet: Option<String>,
     thumbnail_permits: Arc<Semaphore>,
+    /// Wakes up the background thumbnail worker.
+    thumbnail_wakeup: Arc<Notify>,
+}
+
+impl AppState {
+    fn thumb_path(&self, album: &str, size: &str, filename: &str) -> PathBuf {
+        self.cache_dir.join(album).join(size).join(filename)
+    }
+
+    /// Whether the AVIF thumbnail of a photo has been rendered. If not, wakes
+    /// up the background worker, in case the photo is new.
+    fn avif_ready(&self, album: &str, size: &str, filename: &str) -> bool {
+        let ready = self
+            .thumb_path(album, size, &format!("{filename}.avif"))
+            .is_file();
+        if !ready {
+            self.thumbnail_wakeup.notify_one();
+        }
+        ready
+    }
 }
 
 #[derive(Deserialize, Default)]
@@ -94,6 +129,8 @@ struct Album {
     timespan: String,
     sort_date: Option<String>,
     cover: Option<String>,
+    /// Whether the cover's AVIF thumbnails are ready. Only set on the index page.
+    cover_avif: bool,
 }
 
 #[derive(Clone)]
@@ -102,6 +139,8 @@ struct Photo {
     date: Option<String>,
     /// Pixel dimensions, so the album grid can reserve space before thumbnails load.
     dimensions: Option<(u32, u32)>,
+    /// Whether the AVIF thumbnail at the size the page shows is ready.
+    avif: bool,
 }
 
 #[derive(Template)]
@@ -149,7 +188,15 @@ fn is_safe_path_segment(segment: &str) -> bool {
     Path::new(segment).file_name() == Some(OsStr::new(segment))
 }
 
+/// Builds the router without the background thumbnail worker: thumbnails are
+/// then only rendered on request, and only as JPEG.
 pub fn build_router(data_dir: &Path, cache_dir: &Path) -> Router {
+    build_app(data_dir, cache_dir).0
+}
+
+/// Builds the router and the background thumbnail worker, which the caller
+/// runs with `tokio::spawn(worker.run())`.
+pub fn build_app(data_dir: &Path, cache_dir: &Path) -> (Router, ThumbnailWorker) {
     remove_stale_temp_files(cache_dir);
     let config = load_site_config(data_dir);
     let photos_dir = data_dir.join("photos");
@@ -159,16 +206,21 @@ pub fn build_router(data_dir: &Path, cache_dir: &Path) -> Router {
         site_title: config.title.unwrap_or_else(|| "Kuvasivu".to_string()),
         footer_snippet: config.footer_snippet,
         thumbnail_permits: Arc::new(Semaphore::new(MAX_CONCURRENT_THUMBNAILS)),
+        thumbnail_wakeup: Arc::new(Notify::new()),
+    };
+    let worker = ThumbnailWorker {
+        state: state.clone(),
     };
 
-    Router::new()
+    let router = Router::new()
         .route("/", get(index))
         .route("/album/{slug}", get(album))
         .route("/album/{slug}/{filename}", get(photo))
         .route("/photos/{album}/{filename}", get(serve_photo))
         .route("/thumbs/{album}/{size}/{filename}", get(serve_thumb))
         .nest_service("/static", ServeDir::new("static"))
-        .with_state(state)
+        .with_state(state);
+    (router, worker)
 }
 
 /// Removes temp files left behind by thumbnail encodes that were interrupted
@@ -188,7 +240,13 @@ fn remove_stale_temp_files(cache_dir: &Path) {
 }
 
 async fn index(State(state): State<AppState>) -> Result<impl IntoResponse, AppError> {
-    let albums = scan_albums(&state.photos_dir);
+    let mut albums = scan_albums(&state.photos_dir);
+    for album in &mut albums {
+        if let Some(cover) = &album.cover {
+            album.cover_avif = state.avif_ready(&album.slug, "small", cover)
+                && state.avif_ready(&album.slug, "medium", cover);
+        }
+    }
     let site_title = state.site_title.to_string();
     let footer_snippet = state.footer_snippet.clone();
     Ok(Html(
@@ -217,6 +275,7 @@ async fn album(
     for photo in &mut photos {
         // Only reads the image header, not the pixel data.
         photo.dimensions = image::image_dimensions(album_path.join(&photo.filename)).ok();
+        photo.avif = state.avif_ready(&slug, "medium", &photo.filename);
     }
     let album = load_album(&slug, &album_path, &photos);
 
@@ -254,7 +313,8 @@ async fn photo(
 
     let prev = index.checked_sub(1).map(|i| photos[i].clone());
     let next = photos.get(index + 1).cloned();
-    let photo = photos[index].clone();
+    let mut photo = photos[index].clone();
+    photo.avif = state.avif_ready(&slug, "large", &photo.filename);
 
     let album = load_album(&slug, &album_path, &photos);
 
@@ -295,12 +355,7 @@ async fn serve_thumb(
     if !is_safe_path_segment(&album) || !is_safe_path_segment(&filename) {
         return Err(StatusCode::NOT_FOUND);
     }
-    let max_dim = match size.as_str() {
-        "small" => SMALL_SIZE,
-        "medium" => MEDIUM_SIZE,
-        "large" => LARGE_SIZE,
-        _ => return Err(StatusCode::BAD_REQUEST),
-    };
+    let max_dim = thumb_max_dim(&size).ok_or(StatusCode::BAD_REQUEST)?;
 
     // `photo.jpg.avif` is an AVIF-encoded thumbnail of `photo.jpg`.
     let original_name = filename.strip_suffix(".avif").unwrap_or(&filename);
@@ -311,10 +366,14 @@ async fn serve_thumb(
         return Err(StatusCode::NOT_FOUND);
     }
 
-    let thumb_dir = state.cache_dir.join(&album).join(&size);
-    let thumb_path = thumb_dir.join(&filename);
+    let thumb_path = state.thumb_path(&album, &size, &filename);
 
     if !thumb_path.is_file() {
+        // AVIFs are too slow to encode while the browser waits. Pages link to
+        // them only once the background worker has rendered them.
+        if filename.ends_with(".avif") {
+            return Err(StatusCode::NOT_FOUND);
+        }
         let permit = state
             .thumbnail_permits
             .clone()
@@ -329,7 +388,7 @@ async fn serve_thumb(
             // disconnects, so it must keep counting against the limit too.
             tokio::task::spawn_blocking(move || {
                 let _permit = permit;
-                generate_thumbnail(&original, &thumb_path, &thumb_dir, max_dim)
+                generate_thumbnails(&original, &[(thumb_path, max_dim)])
             })
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)??;
@@ -339,36 +398,111 @@ async fn serve_thumb(
     serve_file(&thumb_path).await
 }
 
-fn generate_thumbnail(
-    original: &Path,
-    thumb_path: &Path,
-    thumb_dir: &Path,
-    max_dim: u32,
-) -> Result<(), StatusCode> {
-    std::fs::create_dir_all(thumb_dir).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let img = image::open(original).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    // Only ever scale down.
-    let thumb = if img.width() > max_dim || img.height() > max_dim {
-        img.resize(max_dim, max_dim, FilterType::Lanczos3)
-    } else {
-        img
-    };
+fn thumb_max_dim(size: &str) -> Option<u32> {
+    match size {
+        "small" => Some(SMALL_SIZE),
+        "medium" => Some(MEDIUM_SIZE),
+        "large" => Some(LARGE_SIZE),
+        _ => None,
+    }
+}
 
-    // Write to a unique temp file and rename, so concurrent requests never
-    // see (and serve) a partially written thumbnail.
-    static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
-    let tmp_path = thumb_dir.join(format!(
-        "{TMP_PREFIX}{}-{}",
-        TMP_COUNTER.fetch_add(1, Ordering::Relaxed),
-        thumb_path.file_name().unwrap_or_default().to_string_lossy()
-    ));
-    let result = write_thumbnail(&thumb, &tmp_path, thumb_path)
-        .and_then(|()| std::fs::rename(&tmp_path, thumb_path).map_err(|_| ()));
-    if result.is_err() {
-        let _ = std::fs::remove_file(&tmp_path);
-        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+/// Renders thumbnails of `original` as (path, max dimension) targets,
+/// decoding the original only once.
+fn generate_thumbnails(original: &Path, targets: &[(PathBuf, u32)]) -> Result<(), StatusCode> {
+    let img = image::open(original).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    for (thumb_path, max_dim) in targets {
+        let thumb_dir = thumb_path
+            .parent()
+            .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+        std::fs::create_dir_all(thumb_dir).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        // Only ever scale down.
+        let thumb = if img.width() > *max_dim || img.height() > *max_dim {
+            img.resize(*max_dim, *max_dim, FilterType::Lanczos3)
+        } else {
+            img.clone()
+        };
+
+        // Write to a unique temp file and rename, so concurrent requests never
+        // see (and serve) a partially written thumbnail.
+        static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+        let tmp_path = thumb_dir.join(format!(
+            "{TMP_PREFIX}{}-{}",
+            TMP_COUNTER.fetch_add(1, Ordering::Relaxed),
+            thumb_path.file_name().unwrap_or_default().to_string_lossy()
+        ));
+        let result = write_thumbnail(&thumb, &tmp_path, thumb_path)
+            .and_then(|()| std::fs::rename(&tmp_path, thumb_path).map_err(|_| ()));
+        if result.is_err() {
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
     }
     Ok(())
+}
+
+/// Renders thumbnails in the background, so pages don't wait for them.
+pub struct ThumbnailWorker {
+    state: AppState,
+}
+
+impl ThumbnailWorker {
+    pub async fn run(self) {
+        // Photos that failed to render, with their modification time, so a
+        // broken file isn't decoded again on every pass until it's replaced.
+        let mut failed = HashSet::new();
+        loop {
+            self.render_missing(&mut failed).await;
+            let _ =
+                tokio::time::timeout(RESCAN_INTERVAL, self.state.thumbnail_wakeup.notified()).await;
+        }
+    }
+
+    async fn render_missing(&self, failed: &mut HashSet<(PathBuf, Option<SystemTime>)>) {
+        for (sizes, suffix) in BACKGROUND_PASSES {
+            for album in scan_albums(&self.state.photos_dir) {
+                let album_path = self.state.photos_dir.join(&album.slug);
+                for photo in list_photos(&album_path) {
+                    let original = album_path.join(&photo.filename);
+                    let modified = std::fs::metadata(&original).and_then(|m| m.modified()).ok();
+                    let key = (original, modified);
+                    if failed.contains(&key) {
+                        continue;
+                    }
+                    let missing = || -> Vec<(PathBuf, u32)> {
+                        sizes
+                            .iter()
+                            .filter_map(|size| {
+                                let name = format!("{}{suffix}", photo.filename);
+                                let path = self.state.thumb_path(&album.slug, size, &name);
+                                Some((path, thumb_max_dim(size)?))
+                            })
+                            .filter(|(path, _)| !path.is_file())
+                            .collect()
+                    };
+                    if missing().is_empty() {
+                        continue;
+                    }
+                    let Ok(permit) = self.state.thumbnail_permits.clone().acquire_owned().await
+                    else {
+                        return;
+                    };
+                    // A request may have rendered some while we waited for a permit.
+                    let targets = missing();
+                    let original = key.0.clone();
+                    let result = tokio::task::spawn_blocking(move || {
+                        let _permit = permit;
+                        generate_thumbnails(&original, &targets)
+                    })
+                    .await;
+                    if !matches!(result, Ok(Ok(()))) {
+                        tracing::warn!("failed to render thumbnails of {}", key.0.display());
+                        failed.insert(key);
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Encodes `thumb` into `path`, picking the format from `final_path`'s extension.
@@ -455,6 +589,7 @@ fn load_album(slug: &str, album_path: &Path, photos: &[Photo]) -> Album {
         sort_date: derive_sort_date(photos),
         slug: slug.to_string(),
         cover,
+        cover_avif: false,
     }
 }
 
@@ -485,6 +620,7 @@ fn list_photos(album_path: &Path) -> Vec<Photo> {
                 filename: name,
                 date,
                 dimensions: None,
+                avif: false,
             });
         }
     }
@@ -759,6 +895,7 @@ mod tests {
             site_title: String::new(),
             footer_snippet: None,
             thumbnail_permits: Arc::new(Semaphore::new(1)),
+            thumbnail_wakeup: Arc::new(Notify::new()),
         };
 
         // Simulate the browser giving up on the request mid-generation.

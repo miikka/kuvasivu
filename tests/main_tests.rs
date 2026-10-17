@@ -235,21 +235,73 @@ async fn test_serve_thumb_medium() {
 }
 
 #[tokio::test]
-async fn test_serve_thumb_avif() {
+async fn test_serve_thumb_avif_not_rendered() {
+    // AVIFs are only rendered in the background, never on request.
     let env = setup_with_album();
+    assert_eq!(
+        get_status(env.router, "/thumbs/test-album/small/photo-a.jpg.avif").await,
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
+async fn test_background_worker_renders_jpegs_then_avifs() {
+    let dir = tempfile::tempdir().unwrap();
+    let album_dir = dir.path().join("photos/test-album");
+    fs::create_dir_all(&album_dir).unwrap();
+    // The small fixture keeps the AVIF encodes quick.
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/DSCF0263.jpg");
+    fs::copy(&fixture, album_dir.join("photo-a.jpg")).unwrap();
+    fs::copy(&fixture, album_dir.join("photo-b.jpg")).unwrap();
+    let cache_dir = dir.path().join("cache");
+    let (router, worker) = kuvasivu::build_app(dir.path(), &cache_dir);
+
+    // Before the AVIFs are ready, pages only link to the JPEGs.
+    let (_, body) = get(router.clone(), "/album/test-album").await;
+    assert!(!body.contains(".avif"));
+
+    let worker = tokio::spawn(worker.run());
+    let first_avif = cache_dir.join("test-album/medium/photo-a.jpg.avif");
+    let last_avif = cache_dir.join("test-album/large/photo-b.jpg.avif");
+    let mut saw_first_avif = false;
+    tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        while !last_avif.is_file() {
+            if !saw_first_avif && first_avif.is_file() {
+                saw_first_avif = true;
+                // Every JPEG is done before the first AVIF.
+                for name in [
+                    "small/photo-a.jpg",
+                    "medium/photo-a.jpg",
+                    "small/photo-b.jpg",
+                    "medium/photo-b.jpg",
+                ] {
+                    assert!(cache_dir.join("test-album").join(name).is_file(), "{name}");
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("worker should render all thumbnails");
+    worker.abort();
+
+    let (_, body) = get(router.clone(), "/album/test-album").await;
+    assert!(body.contains(r#"<source srcset="/thumbs/test-album/medium/photo-a.jpg.avif""#));
+    let (_, body) = get(router.clone(), "/album/test-album/photo-b.jpg").await;
+    assert!(body.contains(r#"<source srcset="/thumbs/test-album/large/photo-b.jpg.avif""#));
     let (status, body, content_type) =
-        get_bytes(env.router, "/thumbs/test-album/small/photo-a.jpg.avif").await;
+        get_bytes(router, "/thumbs/test-album/medium/photo-a.jpg.avif").await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(content_type, "image/avif");
     assert_eq!(&body[4..12], b"ftypavif");
 
-    // Only the final thumbnail is left in the cache, no temp files.
-    let thumb_dir = env._dir.path().join("cache/test-album/small");
-    let names: Vec<_> = fs::read_dir(thumb_dir)
+    // Only the final thumbnails are left in the cache, no temp files.
+    let names: Vec<_> = fs::read_dir(cache_dir.join("test-album/medium"))
         .unwrap()
-        .map(|e| e.unwrap().file_name())
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .filter(|name| name.starts_with('.'))
         .collect();
-    assert_eq!(names, vec!["photo-a.jpg.avif"]);
+    assert!(names.is_empty(), "{names:?}");
 }
 
 #[test]

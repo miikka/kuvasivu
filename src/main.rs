@@ -17,7 +17,8 @@ async fn main() {
     std::fs::create_dir_all(data_dir.join("photos")).ok();
     std::fs::create_dir_all(&cache_dir).ok();
 
-    let app = kuvasivu::build_router(&data_dir, &cache_dir);
+    let (app, thumbnail_worker) = kuvasivu::build_app(&data_dir, &cache_dir);
+    tokio::spawn(thumbnail_worker.run());
 
     let port = std::env::var("KUVASIVU_PORT").unwrap_or_else(|_| "3000".to_string());
 

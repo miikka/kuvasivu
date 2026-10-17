@@ -32,7 +32,6 @@ expression: body
 
         <div class="photo-main">
             <picture>
-                <source srcset="/thumbs/test-album/large/photo-a.jpg.avif" type="image/avif">
                 <img src="/photos/test-album/photo-a.jpg" alt="photo-a.jpg">
             </picture>
         </div>
@@ -95,8 +94,17 @@ expression: body
             loader.onload = loader.onerror = function() {
                 loader.onload = loader.onerror = null; // run once
                 // update image in place — old image stays visible until new src paints
-                if (mainSource && newSource) {
+                // the AVIF source is only there once it has been rendered
+                if (newSource) {
+                    if (!mainSource) {
+                        mainSource = document.createElement('source');
+                        mainSource.type = 'image/avif';
+                        mainImg.parentNode.insertBefore(mainSource, mainImg);
+                    }
                     mainSource.srcset = newSource.getAttribute('srcset');
+                } else if (mainSource) {
+                    mainSource.remove();
+                    mainSource = null;
                 }
                 mainImg.src = newImg.getAttribute('src');
                 mainImg.alt = newImg.getAttribute('alt') || '';

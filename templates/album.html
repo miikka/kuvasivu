@@ -21,7 +21,9 @@ SPDX-License-Identifier: MIT
     {% for photo in photos %}
     <a href="/album/{{ album.slug }}/{{ photo.filename }}" class="photo-card">
         <picture>
+            {%- if photo.avif %}
             <source srcset="/thumbs/{{ album.slug }}/medium/{{ photo.filename }}.avif" type="image/avif">
+            {%- endif %}
             {#- Intrinsic size reserves the card's space, so lazy loading only fetches what's near the viewport. #}
             <img src="/thumbs/{{ album.slug }}/medium/{{ photo.filename }}" alt="{{ photo.filename }}"
                 {%- if let Some((width, height)) = photo.dimensions %} width="{{ width }}" height="{{ height }}"{% endif %} loading="lazy">
