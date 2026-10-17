@@ -53,6 +53,7 @@ title = "My Portfolio"
 |---|---|---|
 | `KUVASIVU_DATA_DIR` | `.` | Directory containing `site.toml` and `photos/` |
 | `KUVASIVU_CACHE_DIR` | `{data_dir}/cache` | Directory for generated thumbnails |
+| `KUVASIVU_PORT` | `3000` | Port to listen on |
 
 ## Docker
 
