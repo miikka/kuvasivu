@@ -18,6 +18,7 @@ SPDX-License-Identifier: MIT
 - EXIF date extraction via `kamadak-exif` for auto-deriving album timespans
 
 ## Conventions
+- This repo uses `jj` for version control, not git.
 - Keep it simple: no database, no JS frameworks
 - Progressive enhancement: works without JS, CSS enhances layout
 - Photo filenames are URL-safe (lowercase, hyphens)

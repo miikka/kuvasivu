@@ -235,7 +235,6 @@ async fn test_serve_thumb_medium() {
 }
 
 #[tokio::test]
-#[ignore = "slow AVIF encoding in debug builds; run with `just test-avif`"]
 async fn test_serve_thumb_avif() {
     let env = setup_with_album();
     let (status, body, content_type) =
