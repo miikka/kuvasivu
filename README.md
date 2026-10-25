@@ -6,6 +6,8 @@ SPDX-License-Identifier: MIT
 
 # Kuvasivu
 
+![Made with AI. Quality!](./docs/made-with-ai.gif)
+
 A photography portfolio site: put some JPEGs into a directory, receive a gallery.
 
 
